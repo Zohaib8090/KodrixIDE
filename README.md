@@ -4,7 +4,7 @@
 <img src="https://img.shields.io/badge/Architecture-arm64--v8a-FF6B35?style=for-the-badge"/>
 <img src="https://img.shields.io/badge/License-Source--Available-red?style=for-the-badge"/>
 <img src="https://img.shields.io/badge/Status-Alpha-orange?style=for-the-badge"/>
-<img src="https://img.shields.io/badge/Version-1.1.1-blue?style=for-the-badge"/>
+<img src="https://img.shields.io/badge/Version-1.1.0-blue?style=for-the-badge"/>
 <img src="https://img.shields.io/github/stars/Zohaib8090/KodrixIDE?style=for-the-badge"/>
 
 <br/>

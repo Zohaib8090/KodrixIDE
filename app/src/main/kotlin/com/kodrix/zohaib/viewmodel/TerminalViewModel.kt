@@ -732,6 +732,28 @@ class TerminalViewModel(application: Application) : AndroidViewModel(application
     private val _githubToken = MutableStateFlow(prefs.getString("github_token", null))
     val githubToken = _githubToken.asStateFlow()
 
+    // Emits the one-time code when gh auth device flow is detected in terminal output
+    private val _ghDeviceCode = MutableStateFlow<String?>(null)
+    val ghDeviceCode = _ghDeviceCode.asStateFlow()
+    private val GH_CODE_REGEX = Regex("""First copy your one-time code: ([A-Z0-9]{4}-[A-Z0-9]{4})""")
+    private var lastDetectedGhCode: String? = null
+
+    fun handleGhDeviceCode(code: String) {
+        val context = getApplication<Application>().applicationContext
+        // 1. Copy the code to clipboard
+        val clipboard = context.getSystemService(android.content.Context.CLIPBOARD_SERVICE)
+                as android.content.ClipboardManager
+        clipboard.setPrimaryClip(android.content.ClipData.newPlainText("GitHub Code", code))
+        // 2. Open the device activation page in the system browser
+        val intent = android.content.Intent(
+            android.content.Intent.ACTION_VIEW,
+            android.net.Uri.parse("https://github.com/login/device")
+        ).apply { addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK) }
+        context.startActivity(intent)
+        // 3. Clear the event after handling so UI doesn't re-trigger
+        _ghDeviceCode.value = null
+    }
+
     fun loginGithub() {
         val clientId = "Ov23liGDwcWLayi70rk2"
         val redirectUri = "kodrix://github-auth"
@@ -2620,8 +2642,17 @@ class TerminalViewModel(application: Application) : AndroidViewModel(application
 
         val client = object : com.termux.terminal.TerminalSessionClient {
             override fun onTextChanged(changedSession: com.termux.terminal.TerminalSession) {
-                // This now invalidates only the correct bound view
                 instanceHolder?.boundView?.postInvalidate()
+                // Detect gh device auth one-time code in terminal output
+                val screenText = changedSession.emulator?.screen?.transcriptText ?: return
+                val match = GH_CODE_REGEX.find(screenText)
+                if (match != null) {
+                    val code = match.groupValues[1]
+                    if (code != lastDetectedGhCode) {
+                        lastDetectedGhCode = code
+                        _ghDeviceCode.value = code
+                    }
+                }
             }
             override fun onTitleChanged(changedSession: com.termux.terminal.TerminalSession) {}
             override fun onSessionFinished(finishedSession: com.termux.terminal.TerminalSession) {}

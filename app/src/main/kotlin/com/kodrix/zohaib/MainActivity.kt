@@ -29,6 +29,19 @@ class MainActivity : ComponentActivity() {
         setContent {
             KodrixTheme {
                 val isReady by viewModel.isReady.collectAsState()
+                val ghDeviceCode by viewModel.ghDeviceCode.collectAsState()
+                
+                // Automatically copy gh device code & open browser when detected
+                androidx.compose.runtime.LaunchedEffect(ghDeviceCode) {
+                    ghDeviceCode?.let { code ->
+                        android.widget.Toast.makeText(
+                            this@MainActivity,
+                            "GitHub Code Copied: $code. Opening browser...",
+                            android.widget.Toast.LENGTH_LONG
+                        ).show()
+                        viewModel.handleGhDeviceCode(code)
+                    }
+                }
                 
                 // Automatically ask for permissions on startup
                 androidx.compose.runtime.LaunchedEffect(Unit) {

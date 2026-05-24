@@ -17,7 +17,10 @@ enum class AgentRole(val displayName: String, val header: String) {
     LOGGER("Logger (Operations)", "# Logger Workspace")
 }
 
-class AgentOrchestrator(private val aiManager: AIBackendManager) {
+class AgentOrchestrator(
+    private val aiManager: com.kodrix.zohaib.ai.AIBackendManager,
+    private val binaryManager: com.kodrix.zohaib.bridge.BinaryManager
+) {
 
     private val scope = CoroutineScope(Dispatchers.IO)
     private var loopJob: Job? = null
@@ -291,8 +294,15 @@ class AgentOrchestrator(private val aiManager: AIBackendManager) {
             val nativeLibPath = aiManager.application.applicationInfo.nativeLibraryDir
             
             // Critical: Ensure agents have access to our standardized binaries
-            env["PATH"] = "$filesDir/usr/bin:$filesDir/bin:/system/bin:/system/xbin"
-            env["LD_LIBRARY_PATH"] = "$nativeLibPath:$filesDir/lib"
+            // Inject versioned paths if managed by BinaryManager
+            val nodeBinPath = binaryManager.getBinaryPath("node")?.let { java.io.File(it).parent }
+            val nodeLibPath = binaryManager.getLibPath("node")
+            
+            val pathPrefix = if (nodeBinPath != null) "$nodeBinPath:" else ""
+            val libPrefix = if (nodeLibPath != null) "$nodeLibPath:" else ""
+
+            env["PATH"] = "$pathPrefix$filesDir/usr/bin:$filesDir/bin:/system/bin:/system/xbin"
+            env["LD_LIBRARY_PATH"] = "$libPrefix$nativeLibPath:$filesDir/lib"
             env["HOME"] = filesDir
             env["USER"] = "kodrix"
             

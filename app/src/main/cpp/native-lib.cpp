@@ -151,6 +151,20 @@ static const char* do_redirect(const char* pathname, char* buffer, size_t size) 
         }
     }
 
+    // 3. Redirect Termux sandbox paths to avoid EACCES permission warning on gitattributes
+    if (strstr(pathname, "com.termux")) {
+        const char* app_files = getenv("APP_FILES_DIR");
+        if (app_files) {
+            const char* match = strstr(pathname, "/com.termux/files");
+            if (match) {
+                const char* relative = match + 17; // length of "/com.termux/files"
+                snprintf(buffer, size, "%s%s", app_files, relative);
+                LOGI("Redirecting (Termux sandbox leak): %s -> %s", pathname, buffer);
+                return buffer;
+            }
+        }
+    }
+
     return pathname;
 }
 
@@ -290,6 +304,7 @@ Java_com_kodrix_zohaib_bridge_PtyBridge_createPty(JNIEnv *env, jobject thiz, jst
         setenv("HOME", s_home.c_str(), 1);
         setenv("APP_LIB_DIR", s_lib.c_str(), 1);
         setenv("GIT_EXEC_PATH", s_lib.c_str(), 1);
+        setenv("APP_FILES_DIR", s_bin.c_str(), 1);
         
         std::string env_path = s_bin + "/init.sh";
         setenv("ENV", env_path.c_str(), 1);

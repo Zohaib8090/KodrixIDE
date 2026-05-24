@@ -103,7 +103,8 @@ class TerminalViewModel(application: Application) : AndroidViewModel(application
     private var lspDocVersion = 0
 
     private val aiManager = com.kodrix.zohaib.ai.AIBackendManager(application)
-    val agentOrchestrator = com.kodrix.zohaib.ai.AgentOrchestrator(aiManager)
+    val binaryManager = com.kodrix.zohaib.bridge.BinaryManager(application)
+    val agentOrchestrator = com.kodrix.zohaib.ai.AgentOrchestrator(aiManager, binaryManager)
     
     private val _aiChatMessages = MutableStateFlow<List<ChatMessage>>(emptyList())
     val aiChatMessages = _aiChatMessages.asStateFlow()
@@ -286,12 +287,6 @@ class TerminalViewModel(application: Application) : AndroidViewModel(application
     init {
         loadAiHistory()
         
-        // Sync active project to agent
-        viewModelScope.launch {
-            _activeProject.collect { proj ->
-                agentOrchestrator.updateActiveProject(proj)
-            }
-        }
         
         // Show third-party dialog on first run
         if (!prefs.getBoolean("third_party_accepted", false)) {
@@ -910,6 +905,13 @@ class TerminalViewModel(application: Application) : AndroidViewModel(application
         startLogcatStream()
         checkUpdate()
         testNetwork()
+        
+        // Sync active project to agent (Safe here)
+        viewModelScope.launch {
+            _activeProject.collect { proj ->
+                agentOrchestrator.updateActiveProject(proj)
+            }
+        }
     }
 
     private fun testNetwork() {
@@ -964,6 +966,16 @@ class TerminalViewModel(application: Application) : AndroidViewModel(application
     private fun findBinary(filesDir: java.io.File, binaryName: String): java.io.File? {
         Log.d("Kodrix", "findBinary: searching for $binaryName in ${filesDir.absolutePath}")
         
+        // Check BinaryManager first (versioned binaries)
+        val managedPath = binaryManager.getBinaryPath(binaryName)
+        if (managedPath != null) {
+            val f = java.io.File(managedPath)
+            if (f.exists()) {
+                Log.d("Kodrix", "findBinary: $binaryName found in managed versions at $managedPath")
+                return f
+            }
+        }
+
         // Check common locations first (fast path)
         val commonPaths = listOf(
             "usr/bin/$binaryName",
@@ -1243,7 +1255,27 @@ class TerminalViewModel(application: Application) : AndroidViewModel(application
                     val response = conn.inputStream.bufferedReader().use { it.readText() }
                     val json = JSONObject(response)
                     val latestTag = json.getString("tag_name").replace("v", "")
-                    if (latestTag != currentVersion) {
+                    
+                    val isNewer = try {
+                        val latestParts = latestTag.split(".").map { it.toInt() }
+                        val currentParts = currentVersion.split(".").map { it.toInt() }
+                        var newer = false
+                        for (i in 0 until maxOf(latestParts.size, currentParts.size)) {
+                            val l = latestParts.getOrNull(i) ?: 0
+                            val c = currentParts.getOrNull(i) ?: 0
+                            if (l > c) {
+                                newer = true
+                                break
+                            } else if (l < c) {
+                                break
+                            }
+                        }
+                        newer
+                    } catch (e: Exception) {
+                        latestTag != currentVersion
+                    }
+
+                    if (isNewer) {
                         val assets = json.getJSONArray("assets")
                         var downloadUrl = json.getString("html_url")
                         for (i in 0 until assets.length()) {
@@ -2142,6 +2174,7 @@ class TerminalViewModel(application: Application) : AndroidViewModel(application
         val current = _activeTabIndices.value.toMutableMap()
         current[viewportId] = tabIndex
         _activeTabIndices.value = current
+        clearCompletions()
     }
 
     fun closeTab(index: Int) {
@@ -2161,6 +2194,7 @@ class TerminalViewModel(application: Application) : AndroidViewModel(application
                 }
             }
             _activeTabIndices.value = currentIndices
+            clearCompletions()
         }
     }
 
@@ -2256,8 +2290,13 @@ class TerminalViewModel(application: Application) : AndroidViewModel(application
             } else {
                 val cursorOffset = tab.text.selection.start
                 val insertText = item.insertText ?: item.label
-                val t = currentText.substring(0, cursorOffset) + insertText + currentText.substring(cursorOffset)
-                Pair(t, cursorOffset + insertText.length)
+                // Backtrack to find word start to avoid prefix duplication
+                var start = cursorOffset
+                while (start > 0 && (currentText[start - 1].isLetterOrDigit() || currentText[start - 1] == '_')) {
+                    start--
+                }
+                val t = currentText.substring(0, start) + insertText + currentText.substring(cursorOffset)
+                Pair(t, start + insertText.length)
             }
             
             val newValue = TextFieldValue(newText, TextRange(newCursor))
@@ -2609,7 +2648,7 @@ class TerminalViewModel(application: Application) : AndroidViewModel(application
         val newPath = "$binDir/bin:$binDir/usr/git-exec:/system/bin:/system/xbin:/vendor/bin"
         val envPath = "$binDir/init.sh"
 
-        val env = arrayOf(
+        val envList = mutableListOf(
             "PATH=$newPath",
             "TERM=xterm-256color",
             "HOME=$cwd",
@@ -2617,6 +2656,10 @@ class TerminalViewModel(application: Application) : AndroidViewModel(application
             "GIT_EXEC_PATH=$libDir",
             "ENV=$envPath"
         )
+        _githubUser.value?.let { envList.add("KODRIX_GH_USER=$it") }
+        _githubToken.value?.let { envList.add("KODRIX_GH_TOKEN=$it") }
+
+        val env = envList.toTypedArray()
 
         val instance = TerminalInstance(nextId, "sh", cwd, arrayOf("-i", "-l"), env, client)
         instanceHolder = instance // Link holder to instance

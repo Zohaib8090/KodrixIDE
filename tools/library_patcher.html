@@ -1,0 +1,242 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Kodrix Library Patcher</title>
+    <style>
+        body { 
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; 
+            background: #0d1117; 
+            color: #c9d1d9; 
+            display: flex; 
+            flex-direction: column; 
+            align-items: center; 
+            justify-content: center; 
+            height: 100vh; 
+            margin: 0; 
+        }
+        .container { 
+            background: #161b22; 
+            padding: 2.5rem; 
+            border-radius: 12px; 
+            border: 1px solid #30363d; 
+            text-align: center; 
+            max-width: 500px; 
+            width: 100%; 
+            box-shadow: 0 8px 24px rgba(0,0,0,0.5); 
+        }
+        h2 { 
+            margin-top: 0; 
+            color: #58a6ff; 
+            font-size: 24px;
+        }
+        p {
+            color: #8b949e;
+            font-size: 14px;
+            margin-bottom: 20px;
+        }
+        .drop-zone { 
+            border: 2px dashed #30363d; 
+            border-radius: 8px; 
+            padding: 3rem 1.5rem; 
+            margin: 1.5rem 0; 
+            cursor: pointer; 
+            transition: all 0.2s ease;
+            background: #0d1117; 
+        }
+        .drop-zone:hover {
+            border-color: #8b949e;
+        }
+        .drop-zone.dragover { 
+            border-color: #58a6ff; 
+            background: rgba(88, 166, 255, 0.1); 
+        }
+        .btn { 
+            background: #238636; 
+            color: white; 
+            border: 1px solid rgba(240, 246, 252, 0.1); 
+            padding: 12px 20px; 
+            border-radius: 6px; 
+            font-size: 16px; 
+            cursor: pointer; 
+            font-weight: 600; 
+            width: 100%; 
+            transition: background 0.2s;
+        }
+        .btn:hover:not(:disabled) { 
+            background: #2ea043; 
+        }
+        .btn:disabled { 
+            background: #1b4b23; 
+            cursor: not-allowed; 
+            color: #8b949e; 
+            border-color: transparent;
+        }
+        #status { 
+            margin-top: 20px; 
+            font-size: 14px; 
+            min-height: 20px; 
+            font-weight: 500;
+        }
+        .text-success { color: #3fb950; }
+        .text-error { color: #f85149; }
+        .text-info { color: #58a6ff; }
+        input[type="file"] { display: none; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h2>Kodrix Library Patcher</h2>
+        <p>Select or drag & drop a precompiled <code>.so</code> library to instantly patch Termux paths to Android native <code>$ORIGIN</code> relative paths.</p>
+        
+        <input type="file" id="fileInput" accept=".so,*/*">
+        <div class="drop-zone" id="dropZone">
+            <span id="dropText">
+                <svg aria-hidden="true" height="32" viewBox="0 0 16 16" version="1.1" width="32" data-view-component="true" style="fill: #8b949e; margin-bottom: 10px;">
+                    <path d="M2.75 2.5a.25.25 0 0 0-.25.25v10.5c0 .138.112.25.25.25h.5a.75.75 0 0 1 0 1.5h-.5A1.75 1.75 0 0 1 1 13.25V2.75C1 1.784 1.784 1 2.75 1h10.5c.966 0 1.75.784 1.75 1.75v10.5A1.75 1.75 0 0 1 13.25 15h-.5a.75.75 0 0 1 0-1.5h.5a.25.25 0 0 0 .25-.25V2.75a.25.25 0 0 0-.25-.25zM8 10a.75.75 0 0 1-.75-.75V4.56L5.53 6.28a.75.75 0 1 1-1.06-1.06l3-3a.75.75 0 0 1 1.06 0l3 3a.75.75 0 0 1-1.06 1.06l-1.72-1.72v4.69A.75.75 0 0 1 8 10Z"></path>
+                </svg><br>
+                Drag and drop file here<br>or click to browse
+            </span>
+        </div>
+        
+        <button id="patchBtn" class="btn" disabled>Patch & Download</button>
+        <div id="status"></div>
+    </div>
+
+    <script>
+        const dropZone = document.getElementById('dropZone');
+        const fileInput = document.getElementById('fileInput');
+        const patchBtn = document.getElementById('patchBtn');
+        const dropText = document.getElementById('dropText');
+        const status = document.getElementById('status');
+        
+        let selectedFile = null;
+        
+        // Exact matching logic from patch_elf.js
+        const SEARCH_STR = "/data/data/com.termux/files/usr/lib";
+        const REPLACEMENT_BASE = "$ORIGIN";
+
+        function calculateReplacement() {
+            let padding = SEARCH_STR.length - REPLACEMENT_BASE.length;
+            let replacement = REPLACEMENT_BASE;
+            if (padding > 0) {
+                let dots = Math.floor(padding / 2);
+                for (let i = 0; i < dots; i++) {
+                    replacement += "/.";
+                }
+                if (replacement.length < SEARCH_STR.length) {
+                    replacement += "/";
+                }
+            }
+            return replacement;
+        }
+
+        const REPLACEMENT_STR = calculateReplacement();
+
+        // Encode strings to Uint8Array for raw binary comparison
+        const encoder = new TextEncoder();
+        const searchBytes = encoder.encode(SEARCH_STR);
+        const replaceBytes = encoder.encode(REPLACEMENT_STR);
+
+        // UI Interactions
+        dropZone.addEventListener('click', () => fileInput.click());
+
+        dropZone.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            dropZone.classList.add('dragover');
+        });
+
+        dropZone.addEventListener('dragleave', () => {
+            dropZone.classList.remove('dragover');
+        });
+
+        dropZone.addEventListener('drop', (e) => {
+            e.preventDefault();
+            dropZone.classList.remove('dragover');
+            if (e.dataTransfer.files.length > 0) {
+                handleFileSelect(e.dataTransfer.files[0]);
+            }
+        });
+
+        fileInput.addEventListener('change', (e) => {
+            if (e.target.files.length > 0) {
+                handleFileSelect(e.target.files[0]);
+            }
+        });
+
+        function handleFileSelect(file) {
+            selectedFile = file;
+            dropText.innerHTML = `<strong>Selected:</strong> ${file.name}<br><span style="font-size: 12px; color: #8b949e;">(${(file.size / 1024).toFixed(1)} KB)</span>`;
+            patchBtn.disabled = false;
+            setStatus("", "");
+        }
+
+        function setStatus(msg, type) {
+            status.textContent = msg;
+            status.className = type ? `text-${type}` : "";
+        }
+
+        // Binary Patching Logic
+        patchBtn.addEventListener('click', async () => {
+            if (!selectedFile) return;
+            
+            patchBtn.disabled = true;
+            setStatus("Reading binary file...", "info");
+            
+            try {
+                const arrayBuffer = await selectedFile.arrayBuffer();
+                const uint8Array = new Uint8Array(arrayBuffer);
+                
+                let foundCount = 0;
+                
+                // Simple binary search & replace algorithm
+                for (let i = 0; i <= uint8Array.length - searchBytes.length; i++) {
+                    let match = true;
+                    for (let j = 0; j < searchBytes.length; j++) {
+                        if (uint8Array[i + j] !== searchBytes[j]) {
+                            match = false;
+                            break;
+                        }
+                    }
+                    
+                    if (match) {
+                        foundCount++;
+                        // Replace matching bytes
+                        for (let j = 0; j < replaceBytes.length; j++) {
+                            uint8Array[i + j] = replaceBytes[j];
+                        }
+                        // Skip ahead to avoid overlapping matches
+                        i += searchBytes.length - 1;
+                    }
+                }
+                
+                if (foundCount > 0) {
+                    setStatus(`Successfully patched ${foundCount} path(s)! Downloading...`, "success");
+                    
+                    // Trigger native browser download for patched binary
+                    const blob = new Blob([uint8Array], { type: "application/octet-stream" });
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement("a");
+                    a.href = url;
+                    // Provide the patched file with the same name
+                    a.download = selectedFile.name;
+                    document.body.appendChild(a);
+                    a.click();
+                    
+                    setTimeout(() => {
+                        document.body.removeChild(a);
+                        URL.revokeObjectURL(url);
+                    }, 150);
+                } else {
+                    setStatus("No Termux paths found in this file.", "error");
+                }
+            } catch (err) {
+                setStatus(`Error: ${err.message}`, "error");
+            }
+            
+            patchBtn.disabled = false;
+        });
+    </script>
+</body>
+</html>

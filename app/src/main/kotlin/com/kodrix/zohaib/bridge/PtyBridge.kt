@@ -206,11 +206,16 @@ class PtyBridge {
             java.io.FileOutputStream(resolvConf).use { it.write("nameserver 8.8.8.8\nnameserver 8.8.4.4\nnameserver 1.1.1.1\n".toByteArray()) }
 
             val gitConfig = java.io.File(usrEtcDir, "gitconfig")
-            if (!gitConfig.exists()) {
-                java.io.FileOutputStream(gitConfig).use {
-                    it.write("[core]\n\tfileMode = false\n\tautocrlf = false\n[safe]\n\tdirectory = *\n".toByteArray())
-                }
+            // Always rewrite so new config keys are applied to existing installs
+            java.io.FileOutputStream(gitConfig).use {
+                it.write("[user]\n\tname = Kodrix Developer\n\temail = developer@kodrix.local\n[core]\n\tfileMode = false\n\tautocrlf = false\n\tattributesFile = $usrEtcDir/gitattributes\n[safe]\n\tdirectory = *\n[credential]\n\thelper =\n".toByteArray())
             }
+            // Create empty gitattributes so Git never falls back to the Termux system path
+            val gitAttributes = java.io.File(usrEtcDir, "gitattributes")
+            if (!gitAttributes.exists()) gitAttributes.createNewFile()
+            // Create empty credentials file with correct permissions (readable only by this app)
+            val gitCreds = java.io.File(usrEtcDir, "git-credentials")
+            if (!gitCreds.exists()) gitCreds.createNewFile()
             
             val dnsOverride = java.io.File(usrEtcDir, "dns-override.js")
             val dnsContent = """
@@ -612,6 +617,7 @@ class PtyBridge {
             export SSL_CERT_FILE="$usrEtcDir/cacert.pem"
             export SSL_CERT_DIR="$usrEtcDir"
             export GRPC_DEFAULT_SSL_ROOTS_FILE_PATH="$usrEtcDir/cacert.pem"
+            export APP_FILES_DIR="$filesDir"
             
             # Vite & Next.js Stability
             # NOTE: Do NOT add --preserve-symlinks here!
@@ -655,6 +661,13 @@ class PtyBridge {
             WRAPPER
             chmod 755 "$usrBinDir/git-remote-https"
             
+            cat << 'WRAPPER' > "$usrBinDir/gh"
+            #!/system/bin/sh
+            export LD_LIBRARY_PATH="$nativeLibPath:$libLinksDir"
+            exec "$nativeLibPath/libgh_bin.so" "${'$'}@"
+            WRAPPER
+            chmod 755 "$usrBinDir/gh"
+            
             cat << 'EOF' > "$usrBinDir/sh"
             #!/system/bin/sh
             if [ "$1" = "-c" ]; then
@@ -679,10 +692,42 @@ class PtyBridge {
             export SHELL="$usrBinDir/sh"
             export NPM_CONFIG_SHELL="$usrBinDir/sh"
             
+            cat << 'EOF' > "$usrBinDir/git-credential-kodrix"
+            #!/system/bin/sh
+            if [ "${'$'}1" = "get" ]; then
+                if [ -n "${'$'}KODRIX_GH_TOKEN" ]; then
+                    echo "username=${'$'}{KODRIX_GH_USER:-kodrix}"
+                    echo "password=${'$'}KODRIX_GH_TOKEN"
+                fi
+            fi
+            EOF
+            chmod 755 "$usrBinDir/git-credential-kodrix"
+
             # Force Git to use HTTPS instead of SSH
             git config --global url."https://github.com/".insteadOf "git@github.com:"
             git config --global url."https://".insteadOf "ssh://"
             git config --global core.autocrlf false
+            git config --global core.attributesFile "$usrEtcDir/gitattributes"
+            # Disable external credential helper - use .netrc via libcurl instead (avoids Android W^X exec restrictions)
+            git config --global credential.helper ""
+            touch "$usrEtcDir/gitattributes"
+            [ -z "$(git config --global user.name)" ] && git config --global user.name "Kodrix Developer"
+            [ -z "$(git config --global user.email)" ] && git config --global user.email "developer@kodrix.local"
+
+            # Generate CA bundle from Android system certs (fixes TLS for gh and other tools)
+            if [ ! -s "$usrEtcDir/cacert.pem" ]; then
+                cat /system/etc/security/cacerts/*.0 >> "$usrEtcDir/cacert.pem" 2>/dev/null || true
+            fi
+
+            # Write GUI credentials if logged in via the Kodrix GUI
+            if [ -n "${'$'}KODRIX_GH_TOKEN" ]; then
+                # .netrc: read by libcurl internally - no exec needed, bypasses W^X entirely
+                printf 'machine github.com\nlogin %s\npassword %s\n' "${'$'}{KODRIX_GH_USER:-kodrix}" "${'$'}KODRIX_GH_TOKEN" > "${'$'}HOME/.netrc"
+                chmod 600 "${'$'}HOME/.netrc"
+                # Write gh CLI config directly - bypasses TLS verification during auth
+                mkdir -p "${'$'}HOME/.config/gh"
+                printf 'github.com:\n    oauth_token: %s\n    user: %s\n    git_protocol: https\n' "${'$'}KODRIX_GH_TOKEN" "${'$'}{KODRIX_GH_USER:-kodrix}" > "${'$'}HOME/.config/gh/hosts.yml"
+            fi
             
             _npm_fix() {
                 if [ -d "node_modules" ]; then

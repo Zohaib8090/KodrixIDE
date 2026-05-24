@@ -192,7 +192,7 @@ fun CodeEditor(viewModel: TerminalViewModel, viewportId: Int = 0) {
                             lineHeight = (editorFontSize * 1.5).sp
                         ),
                         cursorBrush = SolidColor(Color(0xFF58A6FF)),
-                        visualTransformation = remember(extension) { SyntaxVisualTransformation(extension) },
+                        visualTransformation = remember(extension, diagnostics) { SyntaxVisualTransformation(extension, diagnostics) },
                         keyboardOptions = KeyboardOptions(autoCorrect = false, imeAction = ImeAction.None)
                     )
                 }

@@ -8,7 +8,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.OffsetMapping
 import androidx.compose.ui.text.input.TransformedText
 import androidx.compose.ui.text.input.VisualTransformation
+import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.withStyle
+import com.kodrix.zohaib.lsp.Diagnostic
 
 class SyntaxHighlighter(val extension: String) {
     fun format(text: String): AnnotatedString {
@@ -114,9 +116,51 @@ class SyntaxHighlighter(val extension: String) {
     }
 }
 
-class SyntaxVisualTransformation(val extension: String) : VisualTransformation {
+class SyntaxVisualTransformation(
+    val extension: String,
+    val diagnostics: List<Diagnostic>
+) : VisualTransformation {
     private val highlighter = SyntaxHighlighter(extension)
     override fun filter(text: AnnotatedString): TransformedText {
-        return TransformedText(highlighter.format(text.text), OffsetMapping.Identity)
+        val formatted = highlighter.format(text.text)
+        if (diagnostics.isEmpty()) {
+            return TransformedText(formatted, OffsetMapping.Identity)
+        }
+        val builder = AnnotatedString.Builder(formatted)
+        diagnostics.forEach { diag ->
+            val start = getOffsetAt(text.text, diag.range.start.line, diag.range.start.character)
+            val end = getOffsetAt(text.text, diag.range.end.line, diag.range.end.character)
+            if (start < end && start in 0..text.text.length && end in 0..text.text.length) {
+                val isError = (diag.severity ?: 1) == 1
+                val color = if (isError) Color(0xFFF85149) else Color(0xFFD29922)
+                builder.addStyle(
+                    SpanStyle(
+                        color = color,
+                        textDecoration = TextDecoration.Underline,
+                        fontWeight = FontWeight.Bold
+                    ),
+                    start,
+                    end
+                )
+            }
+        }
+        return TransformedText(builder.toAnnotatedString(), OffsetMapping.Identity)
+    }
+
+    private fun getOffsetAt(text: String, line: Int, character: Int): Int {
+        var curLine = 0
+        var curChar = 0
+        for (i in 0 until text.length) {
+            if (curLine == line && curChar == character) {
+                return i
+            }
+            if (text[i] == '\n') {
+                curLine++
+                curChar = 0
+            } else {
+                curChar++
+            }
+        }
+        return text.length
     }
 }

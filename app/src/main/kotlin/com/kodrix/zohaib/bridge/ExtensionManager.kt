@@ -22,28 +22,43 @@ data class Extension(
     val versions: List<String> = emptyList(),
     val screenshots: List<String> = emptyList(),
     val type: String = "extension", // "extension" or "npm"
-    val packageName: String? = null // For npm type
+    val packageName: String? = null, // For npm type
+    val repo: String = "Zohaib8090/KodrixMarketplace"
 )
 
 object ExtensionManager {
     private const val TAG = "ExtensionManager"
-    private const val GITHUB_REPO = "Zohaib8090/KodrixMarketplace"
     private const val MARKETPLACE_PATH = "marketplace"
 
+    // Scan both the new repository and the old repository to prevent breaking existing content
+    private val REPOSITORIES = listOf(
+        "Zohaib8090/KodrixMarketplace",
+        "Zohaib8090/KodrixIDE"
+    )
+
     suspend fun scanMarketplace(context: Context, token: String? = null, activeProject: String? = null): List<Extension> = withContext(Dispatchers.IO) {
+        val allExtensions = mutableListOf<Extension>()
+        for (repo in REPOSITORIES) {
+            val repoExtensions = scanSingleRepository(context, repo, token, activeProject)
+            allExtensions.addAll(repoExtensions)
+        }
+        // De-duplicate by extension id, prioritizing the newer repo (KodrixMarketplace)
+        allExtensions.distinctBy { it.id }
+    }
+
+    private suspend fun scanSingleRepository(context: Context, repo: String, token: String?, activeProject: String?): List<Extension> {
         val extensions = mutableListOf<Extension>()
         try {
-            val url = URL("https://api.github.com/repos/$GITHUB_REPO/contents/$MARKETPLACE_PATH")
+            val url = URL("https://api.github.com/repos/$repo/contents/$MARKETPLACE_PATH")
             val connection = url.openConnection() as HttpURLConnection
             connection.setRequestProperty("User-Agent", "Kodrix-Android-App")
             if (token != null) {
                 connection.setRequestProperty("Authorization", "token $token")
             }
-            Log.d(TAG, "Scanning Marketplace: $url")
-            Log.d(TAG, "Response Code: ${connection.responseCode}")
+            Log.d(TAG, "Scanning Marketplace repo $repo: $url")
             if (connection.responseCode != 200) {
-                Log.e(TAG, "Failed to scan marketplace: ${connection.responseCode}")
-                return@withContext emptyList()
+                Log.e(TAG, "Failed to scan repo $repo: ${connection.responseCode}")
+                return emptyList()
             }
             
             val response = connection.inputStream.bufferedReader().use { it.readText() }
@@ -53,7 +68,7 @@ object ExtensionManager {
                 val item = items.getJSONObject(i)
                 if (item.getString("type") == "dir") {
                     val name = item.getString("name")
-                    val metadata = fetchMetadata(name)
+                    val metadata = fetchMetadata(repo, name)
                     if (metadata != null) {
                         val id = metadata.getString("id")
                         val type = metadata.optString("type", "extension")
@@ -79,7 +94,7 @@ object ExtensionManager {
                             File(context.filesDir, "extensions/$id").exists()
                         }
 
-                        val versionsList = fetchVersions(name)
+                        val versionsList = fetchVersions(repo, name)
                         val screenshotsArray = metadata.optJSONArray("screenshots")
                         val screenshots = mutableListOf<String>()
                         if (screenshotsArray != null) {
@@ -95,35 +110,36 @@ object ExtensionManager {
                             version = metadata.optString("version", "1.0.0"),
                             author = metadata.optString("author", "Unknown"),
                             iconUrl = metadata.optString("icon", null),
-                            downloadUrl = "https://github.com/$GITHUB_REPO/archive/refs/heads/main.zip",
+                            downloadUrl = "https://github.com/$repo/archive/refs/heads/main.zip",
                             isInstalled = isInstalled,
                             versions = versionsList,
                             screenshots = screenshots,
                             type = type,
-                            packageName = packageName
+                            packageName = packageName,
+                            repo = repo
                         ))
                     }
                 }
             }
         } catch (e: Exception) {
-            Log.e(TAG, "Marketplace scan failed", e)
+            Log.e(TAG, "Marketplace scan failed for repo $repo", e)
         }
-        extensions
+        return extensions
     }
 
-    private suspend fun fetchMetadata(dirName: String): JSONObject? {
+    private suspend fun fetchMetadata(repo: String, dirName: String): JSONObject? {
         return try {
-            val url = URL("https://raw.githubusercontent.com/$GITHUB_REPO/main/$MARKETPLACE_PATH/$dirName/manifest.json")
+            val url = URL("https://raw.githubusercontent.com/$repo/main/$MARKETPLACE_PATH/$dirName/manifest.json")
             val connection = url.openConnection() as HttpURLConnection
             connection.setRequestProperty("User-Agent", "Kodrix-Android-App")
             if (connection.responseCode != 200) {
-                Log.e(TAG, "Metadata fetch failed for $dirName: ${connection.responseCode}")
+                Log.e(TAG, "Metadata fetch failed for $dirName in $repo: ${connection.responseCode}")
                 return null
             }
             val response = connection.inputStream.bufferedReader().use { it.readText() }
             JSONObject(response)
         } catch (e: Exception) {
-            Log.e(TAG, "Metadata error for $dirName", e)
+            Log.e(TAG, "Metadata error for $dirName in $repo", e)
             null
         }
     }
@@ -132,7 +148,7 @@ object ExtensionManager {
         return withContext(Dispatchers.IO) {
             try {
                 val downloadUrl = if (version != null && version != "Latest") {
-                    "https://github.com/$GITHUB_REPO/archive/refs/tags/$version.zip"
+                    "https://github.com/${extension.repo}/archive/refs/tags/$version.zip"
                 } else {
                     extension.downloadUrl
                 }
@@ -174,9 +190,9 @@ object ExtensionManager {
         }
     }
 
-    private suspend fun fetchVersions(dirName: String): List<String> {
+    private suspend fun fetchVersions(repo: String, dirName: String): List<String> {
         return try {
-            val url = URL("https://raw.githubusercontent.com/$GITHUB_REPO/main/$MARKETPLACE_PATH/$dirName/versions.json")
+            val url = URL("https://raw.githubusercontent.com/$repo/main/$MARKETPLACE_PATH/$dirName/versions.json")
             val connection = url.openConnection() as HttpURLConnection
             connection.setRequestProperty("User-Agent", "Kodrix-Android-App")
             if (connection.responseCode != 200) return listOf("Latest")
@@ -198,7 +214,6 @@ object ExtensionManager {
         java.util.zip.ZipInputStream(java.io.FileInputStream(zipFile)).use { zis ->
             var entry = zis.nextEntry
             while (entry != null) {
-                // GitHub ZIPs usually have a root folder like 'repo-main/'
                 val name = entry.name
                 val pathAfterRoot = name.substringAfter('/')
                 

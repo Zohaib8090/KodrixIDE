@@ -1,0 +1,34 @@
+{
+  "extensions": [
+    {
+      "id": "python-support",
+      "name": "Python Support",
+      "author": "Kodrix",
+      "description": "Full Python language support with syntax highlighting, IntelliSense, and debugging.",
+      "icon": "https://raw.githubusercontent.com/Zohaib8090/KodrixIDE/libs/icons/python.png",
+      "category": "Language",
+      "versions": ["1.0.0"],
+      "downloadUrl": "https://github.com/Zohaib8090/KodrixIDE/releases/download/v1.1.1/ext-python-support.zip"
+    },
+    {
+      "id": "github-dark-theme",
+      "name": "GitHub Dark Theme",
+      "author": "Kodrix",
+      "description": "The official GitHub dark theme for Kodrix IDE.",
+      "icon": "https://raw.githubusercontent.com/Zohaib8090/KodrixIDE/libs/icons/github-dark.png",
+      "category": "Theme",
+      "versions": ["1.0.0"],
+      "downloadUrl": "https://github.com/Zohaib8090/KodrixIDE/releases/download/v1.1.1/ext-github-dark.zip"
+    },
+    {
+      "id": "web-language-server",
+      "name": "Web Language Server",
+      "author": "Kodrix",
+      "description": "HTML, CSS, and JavaScript/TypeScript language server with full IntelliSense.",
+      "icon": "https://raw.githubusercontent.com/Zohaib8090/KodrixIDE/libs/icons/web-lsp.png",
+      "category": "Language",
+      "versions": ["1.0.0", "1.1.0"],
+      "downloadUrl": "https://github.com/Zohaib8090/KodrixIDE/releases/download/v1.1.1/ext-web-lsp.zip"
+    }
+  ]
+}

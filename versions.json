@@ -1,0 +1,28 @@
+{
+  "node": [
+    {
+      "version": "22.0.0",
+      "tag": "v22 (Current)",
+      "arm64-v8a": "https://github.com/Zohaib8090/KodrixIDE/releases/download/v1.1.1/node-v22-arm64.zip",
+      "armeabi-v7a": "https://github.com/Zohaib8090/KodrixIDE/releases/download/v1.1.1/node-v22-arm32.zip",
+      "x86_64": "https://github.com/Zohaib8090/KodrixIDE/releases/download/v1.1.1/node-v22-x86_64.zip",
+      "x86": "https://github.com/Zohaib8090/KodrixIDE/releases/download/v1.1.1/node-v22-x86.zip"
+    },
+    {
+      "version": "20.12.2",
+      "tag": "v20 (LTS)",
+      "arm64-v8a": "https://github.com/Zohaib8090/KodrixIDE/releases/download/v1.1.1/node-v20-arm64.zip",
+      "armeabi-v7a": "https://github.com/Zohaib8090/KodrixIDE/releases/download/v1.1.1/node-v20-arm32.zip",
+      "x86_64": "https://github.com/Zohaib8090/KodrixIDE/releases/download/v1.1.1/node-v20-x86_64.zip",
+      "x86": "https://github.com/Zohaib8090/KodrixIDE/releases/download/v1.1.1/node-v20-x86.zip"
+    },
+    {
+      "version": "18.16.0",
+      "tag": "v18 (Legacy)",
+      "arm64-v8a": "https://github.com/Zohaib8090/KodrixIDE/releases/download/v1.1.1/node-v18-arm64.zip",
+      "armeabi-v7a": "https://github.com/Zohaib8090/KodrixIDE/releases/download/v1.1.1/node-v18-arm32.zip",
+      "x86_64": "https://github.com/Zohaib8090/KodrixIDE/releases/download/v1.1.1/node-v18-x86_64.zip",
+      "x86": "https://github.com/Zohaib8090/KodrixIDE/releases/download/v1.1.1/node-v18-x86.zip"
+    }
+  ]
+}

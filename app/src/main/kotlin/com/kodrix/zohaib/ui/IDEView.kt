@@ -1864,64 +1864,6 @@ fun SettingsContent(viewModel: TerminalViewModel) {
             InfoRowItem("Device", android.os.Build.MODEL, uiScale)
 
             Spacer(Modifier.height(32.dp))
-            Text("Binary Toolbox", color = Color.White, fontSize = (14 * uiScale).sp, fontWeight = FontWeight.Bold)
-            Spacer(Modifier.height(16.dp))
-            
-            val versions by viewModel.binaryManager.availableVersions.collectAsState()
-            val isSyncing by viewModel.binaryManager.isSyncing.collectAsState()
-            val downloadProgress by viewModel.binaryManager.downloadProgress.collectAsState()
-            
-            LaunchedEffect(Unit) {
-                viewModel.binaryManager.syncVersions()
-            }
-            
-            if (isSyncing && versions.isEmpty()) {
-                CircularProgressIndicator(modifier = Modifier.size(24.dp).align(Alignment.CenterHorizontally), color = Color(0xFF58A6FF))
-            } else {
-                versions.forEach { ver ->
-                    Row(
-                        modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text("${ver.tool.uppercase()} ${ver.version}", color = Color.White, fontSize = (12 * uiScale).sp, fontWeight = FontWeight.Bold)
-                            Text(ver.tag, color = Color.Gray, fontSize = (10 * uiScale).sp)
-                        }
-                        
-                        val progress = downloadProgress[ver.version]
-                        if (progress != null) {
-                            LinearProgressIndicator(
-                                progress = progress,
-                                modifier = Modifier.width(60.dp).height(4.dp),
-                                color = Color(0xFF58A6FF),
-                                trackColor = Color(0xFF30363D)
-                            )
-                        } else if (!ver.isInstalled) {
-                            TextButton(onClick = { 
-                                scope.launch {
-                                    viewModel.binaryManager.downloadVersion(ver.tool, ver.version, ver.downloadUrl)
-                                }
-                            }) {
-                                Text("Download", color = Color(0xFF58A6FF), fontSize = (11 * uiScale).sp)
-                            }
-                        } else if (!ver.isActive) {
-                            Button(
-                                onClick = { viewModel.binaryManager.setActiveVersion(ver.tool, ver.version) },
-                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF30363D)),
-                                shape = androidx.compose.foundation.shape.RoundedCornerShape(4.dp),
-                                modifier = Modifier.height(28.dp),
-                                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp)
-                            ) {
-                                Text("Activate", color = Color.White, fontSize = (10 * uiScale).sp)
-                            }
-                        } else {
-                            Icon(Icons.Default.CheckCircle, null, tint = Color(0xFF238636), modifier = Modifier.size(20.dp))
-                        }
-                    }
-                }
-            }
-
-            Spacer(Modifier.height(32.dp))
             Text("Updates", color = Color.White, fontSize = (14 * uiScale).sp, fontWeight = FontWeight.Bold)
             Spacer(Modifier.height(16.dp))
             InfoRowItem("Current Version", "1.1.1", uiScale)

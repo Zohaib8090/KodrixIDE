@@ -60,6 +60,10 @@ data class ForwardedPort(val port: Int, val url: String, val process: Process)
 
 class TerminalViewModel(application: Application) : AndroidViewModel(application) {
     private val prefs = application.getSharedPreferences("kodrix_settings", android.content.Context.MODE_PRIVATE)
+    private val _nodeVersion = MutableStateFlow(prefs.getString("node_version", "25.8.2 (bundled)") ?: "25.8.2 (bundled)")
+    val nodeVersion = _nodeVersion.asStateFlow()
+    private val _gitVersion = MutableStateFlow(prefs.getString("git_version", "2.x (bundled)") ?: "2.x (bundled)")
+    val gitVersion = _gitVersion.asStateFlow()
     private val _instances = MutableStateFlow<List<TerminalInstance>>(emptyList())
     val instances = _instances.asStateFlow()
 
@@ -307,6 +311,22 @@ class TerminalViewModel(application: Application) : AndroidViewModel(application
                 }
             }
         }
+
+        // Keep _nodeVersion in sync with BinaryManager active choice
+        viewModelScope.launch {
+            binaryManager.availableVersions.collect { versions ->
+                val active = versions.find { it.isActive }
+                if (active != null) {
+                    if (active.version == "25.8.2") {
+                        _nodeVersion.value = "25.8.2 (bundled)"
+                    } else {
+                        _nodeVersion.value = active.version
+                    }
+                } else {
+                    _nodeVersion.value = "25.8.2 (bundled)"
+                }
+            }
+        }
     }
 
     fun acceptThirdPartyServices() {
@@ -413,16 +433,32 @@ class TerminalViewModel(application: Application) : AndroidViewModel(application
         Log.d("Kodrix", "LSP: nodeBin=$nodeBin")
 
         val dnsOverridePath = java.io.File(filesDir, "dns-override.js").absolutePath
+
+        // Inject the active Node.js version paths for LSP execution
+        val activeNodeVersion = binaryManager.getActiveVersion("node")
+        val activeNodeBinDir = if (activeNodeVersion != null)
+            java.io.File(filesDir, "versions/node/$activeNodeVersion/bin").absolutePath else null
+        val activeNodeLibDir = if (activeNodeVersion != null)
+            java.io.File(filesDir, "versions/node/$activeNodeVersion/lib").absolutePath else null
+
+        val ldPath = buildString {
+            if (activeNodeLibDir != null) append("$activeNodeLibDir:")
+            append("$nativeLibPath:$libLinksDir")
+        }
+        val pathEnv = buildString {
+            if (activeNodeBinDir != null) append("$activeNodeBinDir:")
+            append("$filesDir/usr/bin:$filesDir/bin:$nativeLibPath:/system/bin:/system/xbin")
+        }
         val env = mapOf(
             "HOME" to filesDir,
             "USER" to "kodrix",
             "TMPDIR" to java.io.File(filesDir, "tmp").apply { mkdirs() }.absolutePath,
-            "LD_LIBRARY_PATH" to "$nativeLibPath:$libLinksDir",
+            "LD_LIBRARY_PATH" to ldPath,
             "NODE_PATH" to "$filesDir/lsp/node_modules:$filesDir/npm_pkg/node_modules",
-            // Use filesDir/usr/bin (matching runNpm)
-            "PATH" to "$filesDir/usr/bin:$filesDir/bin:$nativeLibPath:/system/bin:/system/xbin",
+            "PATH" to pathEnv,
             "OPENSSL_CONF" to "/dev/null",
-            "NODE_OPTIONS" to "--require $dnsOverridePath"
+            "NODE_OPTIONS" to "--require $dnsOverridePath",
+            "APP_FILES_DIR" to filesDir
         )
 
         // The npm .bin entries are shell scripts (#!/usr/bin/env node).
@@ -1071,9 +1107,20 @@ class TerminalViewModel(application: Application) : AndroidViewModel(application
             val dnsOverridePath = java.io.File(filesDir, "dns-override.js").absolutePath
             val binDir = filesDir.absolutePath
 
+            // Resolve active Node.js version
+            val activeNodeVersion = binaryManager.getActiveVersion("node")
+            val activeNodeBinDir = if (activeNodeVersion != null)
+                java.io.File(filesDir, "versions/node/$activeNodeVersion/bin").absolutePath else null
+            val activeNodeLibDir = if (activeNodeVersion != null)
+                java.io.File(filesDir, "versions/node/$activeNodeVersion/lib").absolutePath else null
+            val activeNpmCli = if (activeNodeVersion != null) {
+                val f = java.io.File(filesDir, "versions/node/$activeNodeVersion/lib/node_modules/npm/bin/npm-cli.js")
+                if (f.exists()) f else null
+            } else null
+
             // Dynamically detect node and npm-cli.js regardless of version/layout
             val nodeBin = findBinary(filesDir, "node")
-            val npmScript = findBinary(filesDir, "npm-cli.js")
+            val npmScript = activeNpmCli ?: findBinary(filesDir, "npm-cli.js")
 
             if (nodeBin == null) {
                 withContext(Dispatchers.Main) {
@@ -1115,11 +1162,20 @@ class TerminalViewModel(application: Application) : AndroidViewModel(application
                 env["HOME"] = binDir
                 env["USER"] = "kodrix"
                 env["TMPDIR"] = java.io.File(filesDir, "tmp").apply { mkdirs() }.absolutePath
-                env["LD_LIBRARY_PATH"] = "$nativeLibPath:$libLinksDir"
+                val ldPath = buildString {
+                    if (activeNodeLibDir != null) append("$activeNodeLibDir:")
+                    append("$nativeLibPath:$libLinksDir")
+                }
+                val pathEnv = buildString {
+                    if (activeNodeBinDir != null) append("$activeNodeBinDir:")
+                    append("${filesDir.absolutePath}/usr/bin:${filesDir.absolutePath}/bin:$nativeLibPath:/system/bin:/system/xbin")
+                }
+                env["LD_LIBRARY_PATH"] = ldPath
                 env["NODE_PATH"] = ".:$binDir/npm_pkg/node_modules"
-                env["PATH"] = "$binDir/usr/bin:$binDir/bin:$nativeLibPath:/system/bin:/system/xbin"
+                env["PATH"] = pathEnv
                 env["OPENSSL_CONF"] = "/dev/null"
                 env["NODE_OPTIONS"] = "--require $dnsOverridePath"
+                env["APP_FILES_DIR"] = binDir
                 pb.redirectErrorStream(true)
                 
                 val process = pb.start()
@@ -1531,30 +1587,54 @@ class TerminalViewModel(application: Application) : AndroidViewModel(application
         val proj = _activeProject.value
         val projDir = if (proj != null) java.io.File(projectsRoot, proj) else projectsRoot
         val targetDir = workingDir ?: projDir
-        val filesDir = getApplication<Application>().filesDir.absolutePath
+        val filesDir = getApplication<Application>().filesDir
+        val filesDirPath = filesDir.absolutePath
         val nativeLibPath = getApplication<Application>().applicationInfo.nativeLibraryDir
-        val nodeBin = java.io.File(getApplication<Application>().filesDir, "usr/bin/node").absolutePath
-        val npmCli = java.io.File(getApplication<Application>().filesDir, "npm_pkg/bin/npm-cli.js").absolutePath
-        val libLinksDir = java.io.File(filesDir, "lib").absolutePath
-        
+        val libLinksDir = java.io.File(filesDirPath, "lib").absolutePath
+
+        // Resolve active Node.js version from BinaryManager
+        val activeNodeVersion = binaryManager.getActiveVersion("node")
+        val activeNodeBinDir = if (activeNodeVersion != null)
+            java.io.File(filesDir, "versions/node/$activeNodeVersion/bin").absolutePath else null
+        val activeNodeLibDir = if (activeNodeVersion != null)
+            java.io.File(filesDir, "versions/node/$activeNodeVersion/lib").absolutePath else null
+        val activeNpmCli = if (activeNodeVersion != null) {
+            val f = java.io.File(filesDir, "versions/node/$activeNodeVersion/lib/node_modules/npm/bin/npm-cli.js")
+            if (f.exists()) f.absolutePath else null
+        } else null
+
+        val nodeBin = activeNodeBinDir?.let { "$it/node" }
+            ?: java.io.File(filesDir, "usr/bin/node").absolutePath
+        val npmCli = activeNpmCli
+            ?: java.io.File(filesDir, "npm_pkg/bin/npm-cli.js").absolutePath
+
         Log.d("Kodrix", "NPM EXEC: node=$nodeBin npm=$npmCli cwd=${targetDir.absolutePath}")
-        
+
         val pb = ProcessBuilder(nodeBin, npmCli, *args)
         pb.directory(targetDir)
-        
-        val dnsOverridePath = java.io.File(getApplication<Application>().filesDir, "dns-override.js").absolutePath
+
+        val dnsOverridePath = java.io.File(filesDir, "dns-override.js").absolutePath
+        val ldPath = buildString {
+            if (activeNodeLibDir != null) append("$activeNodeLibDir:")
+            append("$nativeLibPath:$libLinksDir")
+        }
+        val pathEnv = buildString {
+            if (activeNodeBinDir != null) append("$activeNodeBinDir:")
+            append("$filesDirPath/usr/bin:$filesDirPath/bin:$nativeLibPath:/system/bin:/system/xbin")
+        }
         val env = pb.environment()
-        env["HOME"] = filesDir
+        env["HOME"] = filesDirPath
         env["USER"] = "kodrix"
         env["TMPDIR"] = java.io.File(filesDir, "tmp").apply { mkdirs() }.absolutePath
-        env["LD_LIBRARY_PATH"] = "$nativeLibPath:$libLinksDir"
-        env["NODE_PATH"] = ".:$filesDir/npm_pkg/node_modules"
-        env["PATH"] = "$filesDir/usr/bin:$filesDir/bin:$nativeLibPath:/system/bin:/system/xbin"
+        env["LD_LIBRARY_PATH"] = ldPath
+        env["APP_FILES_DIR"] = filesDirPath
+        env["NODE_PATH"] = ".:$filesDirPath/npm_pkg/node_modules"
+        env["PATH"] = pathEnv
         env["OPENSSL_CONF"] = "/dev/null"
         env["NODE_OPTIONS"] = "--require $dnsOverridePath"
-        
+
         pb.redirectErrorStream(true)
-        
+
         return try {
             pb.start()
         } catch (e: Exception) {
@@ -1688,10 +1768,7 @@ class TerminalViewModel(application: Application) : AndroidViewModel(application
     val binaryUpdateProgressInfo = _binaryUpdateProgressInfo.asStateFlow()
     private val _isUpdatingBinaries = MutableStateFlow(false)
     val isUpdatingBinaries = _isUpdatingBinaries.asStateFlow()
-    private val _nodeVersion = MutableStateFlow(prefs.getString("node_version", "18.x (bundled)") ?: "18.x (bundled)")
-    val nodeVersion = _nodeVersion.asStateFlow()
-    private val _gitVersion = MutableStateFlow(prefs.getString("git_version", "2.x (bundled)") ?: "2.x (bundled)")
-    val gitVersion = _gitVersion.asStateFlow()
+
 
     fun checkBinaryUpdates() {
         viewModelScope.launch(Dispatchers.IO) {
@@ -2676,17 +2753,32 @@ class TerminalViewModel(application: Application) : AndroidViewModel(application
 
         val binDir = context.filesDir.absolutePath
         val libDir = context.applicationInfo.nativeLibraryDir
-        val newPath = "$binDir/bin:$binDir/usr/git-exec:/system/bin:/system/xbin:/vendor/bin"
+
+        // Inject the active Node.js version's bin/ and lib/ dirs if available
+        val activeNodeVersion = binaryManager.getActiveVersion("node")
+        val activeNodeBinDir = if (activeNodeVersion != null) {
+            java.io.File(context.filesDir, "versions/node/$activeNodeVersion/bin").absolutePath
+        } else null
+        val activeNodeLibDir = if (activeNodeVersion != null) {
+            java.io.File(context.filesDir, "versions/node/$activeNodeVersion/lib").absolutePath
+        } else null
+
+        val newPath = buildString {
+            if (activeNodeBinDir != null) append("$activeNodeBinDir:")
+            append("$binDir/usr/bin:$binDir/bin:$binDir/usr/git-exec:/system/bin:/system/xbin:/vendor/bin")
+        }
         val envPath = "$binDir/init.sh"
 
         val envList = mutableListOf(
             "PATH=$newPath",
             "TERM=xterm-256color",
             "HOME=$cwd",
+            "APP_FILES_DIR=$binDir",
             "APP_LIB_DIR=$libDir",
             "GIT_EXEC_PATH=$libDir",
             "ENV=$envPath"
         )
+        if (activeNodeLibDir != null) envList.add("LD_LIBRARY_PATH=$activeNodeLibDir:$libDir")
         _githubUser.value?.let { envList.add("KODRIX_GH_USER=$it") }
         _githubToken.value?.let { envList.add("KODRIX_GH_TOKEN=$it") }
 

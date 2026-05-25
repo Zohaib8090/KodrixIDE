@@ -102,20 +102,46 @@ static void init() {
     LOGI("Native hooks library loaded!");
 }
 
+// Reads the active node version string from filesDir/active_node_version
+static bool get_active_node_path(char* out_bin, size_t bin_size, char* out_lib, size_t lib_size) {
+    const char* files_dir = getenv("APP_FILES_DIR");
+    if (!files_dir) return false;
+
+    char version_file[512];
+    snprintf(version_file, sizeof(version_file), "%s/active_node_version", files_dir);
+
+    FILE* fp = fopen(version_file, "r");
+    if (!fp) return false;
+
+    char version[64] = {0};
+    fgets(version, sizeof(version), fp);
+    fclose(fp);
+
+    // Trim trailing newline
+    size_t len = strlen(version);
+    if (len > 0 && version[len-1] == '\n') version[len-1] = '\0';
+    if (strlen(version) == 0) return false;
+
+    snprintf(out_bin, bin_size, "%s/versions/node/%s/bin/node", files_dir, version);
+    snprintf(out_lib, lib_size, "%s/versions/node/%s/lib", files_dir, version);
+
+    // Check if the binary actually exists
+    struct stat st;
+    return stat(out_bin, &st) == 0;
+}
+
 static const char* resolve_helper(const char* path) {
     if (!path) return nullptr;
     if (strstr(path, "git-remote-https")) return "libgit_remote_http_bin.so";
     if (strstr(path, "git-remote-http")) return "libgit_remote_http_bin.so";
     if (strstr(path, "git-remote-ftp")) return "libgit_remote_ftp_bin.so";
     if (strstr(path, "git-remote-ftps")) return "libgit_remote_ftps_bin.so";
-    
-    // Also handle node and git binaries for subshells
+
+    // Git binary for subshells
     const char* last_slash = strrchr(path, '/');
     const char* basename = last_slash ? last_slash + 1 : path;
-    
-    if (strcmp(basename, "node") == 0) return "libnode.so";
     if (strcmp(basename, "git") == 0) return "libgit_bin.so";
-    
+
     return nullptr;
 }
 
@@ -229,7 +255,58 @@ int __lxstat(int ver, const char *pathname, struct stat *statbuf) {
 
 int execve(const char *filename, char *const argv[], char *const envp[]) {
     if (!real_execve) real_execve = (execve_t)dlsym(RTLD_NEXT, "execve");
-    
+
+    // Phase 3: Intercept 'node' execution to use the active dynamic version
+    const char* last_slash = filename ? strrchr(filename, '/') : nullptr;
+    const char* bn = last_slash ? last_slash + 1 : filename;
+    if (bn && strcmp(bn, "node") == 0) {
+        static char active_node_bin[512];
+        static char active_node_lib[512];
+        if (get_active_node_path(active_node_bin, sizeof(active_node_bin),
+                                 active_node_lib, sizeof(active_node_lib))) {
+            // Determine system linker (arm64 vs arm32)
+            const char* linker = access("/system/bin/linker64", F_OK) == 0
+                ? "/system/bin/linker64" : "/system/bin/linker";
+
+            // Build new argv: [linker, node_binary, original_args...]
+            int argc = 0;
+            while (argv[argc]) argc++;
+            std::vector<const char*> new_argv;
+            new_argv.push_back(linker);
+            new_argv.push_back(active_node_bin);
+            for (int i = 1; i < argc; i++) new_argv.push_back(argv[i]);
+            new_argv.push_back(nullptr);
+
+            // Inject versioned lib dir into LD_LIBRARY_PATH
+            const char* app_lib_dir = getenv("APP_LIB_DIR") ?: "";
+            const char* old_ldpath = getenv("LD_LIBRARY_PATH") ?: "";
+            static char new_ldpath[1024];
+            snprintf(new_ldpath, sizeof(new_ldpath), "%s:%s:%s",
+                     active_node_lib, app_lib_dir, old_ldpath);
+
+            // Build updated envp with the new LD_LIBRARY_PATH
+            std::vector<const char*> new_envp;
+            static char ldpath_entry[1024];
+            snprintf(ldpath_entry, sizeof(ldpath_entry), "LD_LIBRARY_PATH=%s", new_ldpath);
+            bool found = false;
+            for (int i = 0; envp[i]; i++) {
+                if (strncmp(envp[i], "LD_LIBRARY_PATH=", 16) == 0) {
+                    new_envp.push_back(ldpath_entry);
+                    found = true;
+                } else {
+                    new_envp.push_back(envp[i]);
+                }
+            }
+            if (!found) new_envp.push_back(ldpath_entry);
+            new_envp.push_back(nullptr);
+
+            LOGI("[NodeHook] Redirecting node -> %s via %s", active_node_bin, linker);
+            return real_execve(linker,
+                const_cast<char* const*>(new_argv.data()),
+                const_cast<char* const*>(new_envp.data()));
+        }
+    }
+
     const char* helper = resolve_helper(filename);
     if (helper) {
         const char* lib_dir = getenv("APP_LIB_DIR");
@@ -240,7 +317,7 @@ int execve(const char *filename, char *const argv[], char *const envp[]) {
             return real_execve(actual_path, argv, envp);
         }
     }
-    
+
     char buffer[1024];
     const char* final_path = do_redirect(filename, buffer, sizeof(buffer));
     return real_execve(final_path, argv, envp);

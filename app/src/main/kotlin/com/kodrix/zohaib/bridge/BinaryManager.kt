@@ -42,7 +42,7 @@ class BinaryManager(private val context: Context) {
         _isSyncing.value = true
         try {
             // In a real app, we fetch from a URL. For now, we simulate or use a hardcoded fallback.
-            val registryUrl = "https://raw.githubusercontent.com/Zohaib8090/KodrixIDE/libs/versions.json"
+            val registryUrl = "https://raw.githubusercontent.com/Zohaib8090/KodrixMarketplace/main/versions.json"
             val response = try {
                 URL(registryUrl).readText()
             } catch (e: Exception) {

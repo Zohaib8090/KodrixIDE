@@ -27,7 +27,7 @@ data class Extension(
 
 object ExtensionManager {
     private const val TAG = "ExtensionManager"
-    private const val GITHUB_REPO = "Zohaib8090/KodrixIDE"
+    private const val GITHUB_REPO = "Zohaib8090/KodrixMarketplace"
     private const val MARKETPLACE_PATH = "marketplace"
 
     suspend fun scanMarketplace(context: Context, token: String? = null, activeProject: String? = null): List<Extension> = withContext(Dispatchers.IO) {

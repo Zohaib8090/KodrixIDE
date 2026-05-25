@@ -1773,7 +1773,7 @@ class TerminalViewModel(application: Application) : AndroidViewModel(application
     fun checkBinaryUpdates() {
         viewModelScope.launch(Dispatchers.IO) {
             _binaryUpdateStatus.value = "Checking..."
-            val registryUrl = "https://raw.githubusercontent.com/Zohaib8090/KodrixIDE/main/binaries.json"
+            val registryUrl = "https://raw.githubusercontent.com/Zohaib8090/KodrixIDE/libs/binaries.json"
             try {
                 val update = com.kodrix.zohaib.bridge.BinaryUpdater.checkUpdates(registryUrl)
                 if (update != null) {
@@ -1797,7 +1797,7 @@ class TerminalViewModel(application: Application) : AndroidViewModel(application
             _isUpdatingBinaries.value = true
             try {
                 _binaryUpdateStatus.value = "Downloading Node.js..."
-                val registryUrl = "https://raw.githubusercontent.com/Zohaib8090/KodrixIDE/main/binaries.json"
+                val registryUrl = "https://raw.githubusercontent.com/Zohaib8090/KodrixIDE/libs/binaries.json"
                 val update = com.kodrix.zohaib.bridge.BinaryUpdater.checkUpdates(registryUrl) ?: return@launch
                 
                 val successNode = com.kodrix.zohaib.bridge.BinaryUpdater.downloadAndInstall(getApplication(), update.nodeUrl, "usr") { p, d, t ->

@@ -34,6 +34,8 @@ class BinaryManager(private val context: Context) {
 
     init {
         versionsDir.mkdirs()
+        val activeNode = getActiveVersion("node")
+        syncActiveVersionToFile(activeNode)
     }
 
     suspend fun syncVersions() {
@@ -72,17 +74,32 @@ class BinaryManager(private val context: Context) {
             val abi = android.os.Build.SUPPORTED_ABIS.firstOrNull() ?: "arm64-v8a"
             
             val list = mutableListOf<RemoteVersion>()
+            val activeNode = getActiveVersion("node")
+
+            // Always add default bundled version first
+            list.add(
+                RemoteVersion(
+                    tool = "node",
+                    version = "25.8.2",
+                    tag = "v25 (Bundled)",
+                    downloadUrl = "",
+                    isInstalled = true,
+                    isActive = (activeNode == null || activeNode == "25.8.2")
+                )
+            )
+
             val nodeArray = root.optJSONArray("node") ?: JSONArray()
             
             for (i in 0 until nodeArray.length()) {
                 val obj = nodeArray.getJSONObject(i)
                 val ver = obj.getString("version")
+                if (ver == "25.8.2") continue // skip duplicate of bundled
                 val tag = obj.getString("tag")
                 val url = obj.optString(abi, "")
                 
                 if (url.isNotEmpty()) {
                     val isInstalled = File(versionsDir, "node/$ver/bin/node").exists()
-                    val isActive = getActiveVersion("node") == ver
+                    val isActive = activeNode == ver
                     
                     list.add(RemoteVersion("node", ver, tag, url, isInstalled, isActive))
                 }
@@ -96,16 +113,50 @@ class BinaryManager(private val context: Context) {
     }
 
     fun getActiveVersion(tool: String): String? {
-        return prefs.getString("active_$tool", null)
+        val active = prefs.getString("active_$tool", null)
+        return if (active == "25.8.2") null else active
     }
 
     fun setActiveVersion(tool: String, version: String) {
-        prefs.edit().putString("active_$tool", version).apply()
+        if (version == "25.8.2") {
+            prefs.edit().remove("active_$tool").apply()
+            if (tool == "node") {
+                syncActiveVersionToFile(null)
+            }
+        } else {
+            prefs.edit().putString("active_$tool", version).apply()
+            if (tool == "node") {
+                syncActiveVersionToFile(version)
+            }
+        }
         // Trigger UI refresh
         val updated = _availableVersions.value.map {
-            if (it.tool == tool) it.copy(isActive = it.version == version) else it
+            if (it.tool == tool) {
+                if (version == "25.8.2") {
+                    it.copy(isActive = it.version == "25.8.2")
+                } else {
+                    it.copy(isActive = it.version == version)
+                }
+            } else it
         }
         _availableVersions.value = updated
+    }
+
+    private fun syncActiveVersionToFile(version: String?) {
+        try {
+            val file = File(context.filesDir, "active_node_version")
+            if (version != null && version != "25.8.2") {
+                file.writeText(version)
+                Log.d("BinaryManager", "Synced active node version to file: $version")
+            } else {
+                if (file.exists()) {
+                    file.delete()
+                    Log.d("BinaryManager", "Deleted active node version file")
+                }
+            }
+        } catch (e: Exception) {
+            Log.e("BinaryManager", "Failed to sync active version to file", e)
+        }
     }
 
     fun getBinaryPath(tool: String): String? {
@@ -152,6 +203,10 @@ class BinaryManager(private val context: Context) {
             
             // Set permissions
             File(toolDir, "bin/$tool").setExecutable(true)
+            val npmBin = File(toolDir, "bin/npm")
+            if (npmBin.exists()) npmBin.setExecutable(true)
+            val npxBin = File(toolDir, "bin/npx")
+            if (npxBin.exists()) npxBin.setExecutable(true)
             
             // Update state
             val updated = _availableVersions.value.map {

@@ -630,15 +630,69 @@ class PtyBridge {
             export NEXT_PRIVATE_SKIP_SIZE_LIMIT=1
             
             # Remove existing symlinks if they exist
-            rm -f "$usrBinDir/node" "$usrBinDir/git" "$usrBinDir/git-remote-http" "$usrBinDir/git-remote-https"
+            rm -f "$usrBinDir/node" "$usrBinDir/npm" "$usrBinDir/npx" "$usrBinDir/git" "$usrBinDir/git-remote-http" "$usrBinDir/git-remote-https"
             
             # Shell wrappers
             cat << 'WRAPPER' > "$usrBinDir/node"
             #!/system/bin/sh
-            export LD_LIBRARY_PATH="$nativeLibPath:$libLinksDir"
-            exec "$nativeLibPath/libnode_bin.so" "${'$'}@"
+            # Detect dynamic active version of Node.js
+            ACTIVE_NODE_VER=""
+            if [ -f "${'$'}APP_FILES_DIR/active_node_version" ]; then
+                ACTIVE_NODE_VER=$(cat "${'$'}APP_FILES_DIR/active_node_version")
+            fi
+            
+            if [ -n "${'$'}ACTIVE_NODE_VER" ] && [ -f "${'$'}APP_FILES_DIR/versions/node/${'$'}ACTIVE_NODE_VER/bin/node" ]; then
+                # Run active version! Determine system linker dynamically
+                LINKER="/system/bin/linker"
+                if [ -f "/system/bin/linker64" ]; then
+                    LINKER="/system/bin/linker64"
+                fi
+                export LD_LIBRARY_PATH="${'$'}APP_FILES_DIR/versions/node/${'$'}ACTIVE_NODE_VER/lib:$nativeLibPath:$libLinksDir"
+                exec "${'$'}LINKER" "${'$'}APP_FILES_DIR/versions/node/${'$'}ACTIVE_NODE_VER/bin/node" "${'$'}@"
+            else
+                # Fallback to default
+                export LD_LIBRARY_PATH="$nativeLibPath:$libLinksDir"
+                exec "$nativeLibPath/libnode_bin.so" "${'$'}@"
+            fi
             WRAPPER
             chmod 755 "$usrBinDir/node"
+
+            # NPM wrapper
+            cat << 'WRAPPER' > "$usrBinDir/npm"
+            #!/system/bin/sh
+            ACTIVE_NODE_VER=""
+            if [ -f "${'$'}APP_FILES_DIR/active_node_version" ]; then
+                ACTIVE_NODE_VER=$(cat "${'$'}APP_FILES_DIR/active_node_version")
+            fi
+            if [ -n "${'$'}ACTIVE_NODE_VER" ] && [ -f "${'$'}APP_FILES_DIR/versions/node/${'$'}ACTIVE_NODE_VER/lib/node_modules/npm/bin/npm-cli.js" ]; then
+                exec "$usrBinDir/node" "${'$'}APP_FILES_DIR/versions/node/${'$'}ACTIVE_NODE_VER/lib/node_modules/npm/bin/npm-cli.js" "${'$'}@"
+            else
+                # Fallback npm script path if any default exists
+                if [ -f "${'$'}APP_FILES_DIR/npm_pkg/bin/npm-cli.js" ]; then
+                    exec "$usrBinDir/node" "${'$'}APP_FILES_DIR/npm_pkg/bin/npm-cli.js" "${'$'}@"
+                else
+                    echo "No active Node.js version set or NPM not found."
+                    exit 1
+                fi
+            fi
+            WRAPPER
+            chmod 755 "$usrBinDir/npm"
+
+            # NPX wrapper
+            cat << 'WRAPPER' > "$usrBinDir/npx"
+            #!/system/bin/sh
+            ACTIVE_NODE_VER=""
+            if [ -f "${'$'}APP_FILES_DIR/active_node_version" ]; then
+                ACTIVE_NODE_VER=$(cat "${'$'}APP_FILES_DIR/active_node_version")
+            fi
+            if [ -n "${'$'}ACTIVE_NODE_VER" ] && [ -f "${'$'}APP_FILES_DIR/versions/node/${'$'}ACTIVE_NODE_VER/lib/node_modules/npm/bin/npx-cli.js" ]; then
+                exec "$usrBinDir/node" "${'$'}APP_FILES_DIR/versions/node/${'$'}ACTIVE_NODE_VER/lib/node_modules/npm/bin/npx-cli.js" "${'$'}@"
+            else
+                echo "No active Node.js version set or NPX not found."
+                exit 1
+            fi
+            WRAPPER
+            chmod 755 "$usrBinDir/npx"
 
             cat << 'WRAPPER' > "$usrBinDir/git"
             #!/system/bin/sh

@@ -241,7 +241,11 @@ class AgentOrchestrator(
                 java.io.File(aiManager.application.filesDir, "projects/${_activeProject.value}")
             } else aiManager.application.filesDir
             
+            val canonicalBase = baseDir.canonicalPath
             val file = java.io.File(baseDir, path)
+            val canonicalTarget = file.canonicalPath
+            if (!canonicalTarget.startsWith(canonicalBase)) return "Error: Path traversal detected."
+
             file.parentFile?.mkdirs()
             file.writeText(content)
             "Success: Created file at $path"
@@ -257,7 +261,11 @@ class AgentOrchestrator(
                 java.io.File(aiManager.application.filesDir, "projects/${_activeProject.value}")
             } else aiManager.application.filesDir
             
+            val canonicalBase = baseDir.canonicalPath
             val file = java.io.File(baseDir, path)
+            val canonicalTarget = file.canonicalPath
+            if (!canonicalTarget.startsWith(canonicalBase)) return "Error: Path traversal detected."
+
             if (file.exists()) "Content of $path:\n```\n${file.readText()}\n```"
             else "Error: File not found at $path"
         } catch (e: Exception) {
@@ -270,7 +278,12 @@ class AgentOrchestrator(
             java.io.File(aiManager.application.filesDir, "projects/${_activeProject.value}")
         } else aiManager.application.filesDir
         
+        val canonicalBase = baseDir.canonicalPath
         val dir = java.io.File(baseDir, path ?: "")
+        val canonicalTarget = dir.canonicalPath
+        
+        if (!canonicalTarget.startsWith(canonicalBase)) return "Error: Path traversal detected."
+
         return try {
             val files = dir.listFiles()?.joinToString("\n") { 
                 if (it.isDirectory) "[DIR] ${it.name}" else "[FILE] ${it.name}"
@@ -283,6 +296,13 @@ class AgentOrchestrator(
 
     private suspend fun executeCommand(cmd: String): String {
         return try {
+            // RCE Mitigation: Enforce command allowlist
+            val baseCmd = cmd.trim().split(" ").firstOrNull() ?: ""
+            val allowedCommands = listOf("npm", "npx", "node", "git", "ls", "cat", "mkdir", "rm", "pwd", "cp", "mv")
+            if (!allowedCommands.contains(baseCmd)) {
+                return "Error: Command '$baseCmd' is restricted for security. Only allowed commands are: ${allowedCommands.joinToString()}"
+            }
+
             val baseDir = if (_activeProject.value != null) {
                 java.io.File(aiManager.application.filesDir, "projects/${_activeProject.value}")
             } else aiManager.application.filesDir

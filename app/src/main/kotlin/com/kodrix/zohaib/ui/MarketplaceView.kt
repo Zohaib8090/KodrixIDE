@@ -27,6 +27,7 @@ import coil.compose.AsyncImage
 import com.kodrix.zohaib.viewmodel.TerminalViewModel
 import com.kodrix.zohaib.bridge.Extension
 import com.kodrix.zohaib.bridge.BinaryManager
+import com.kodrix.zohaib.bridge.VersionChecker
 import kotlinx.coroutines.launch
 
 // ─── Tabs ────────────────────────────────────────────────────────────────────
@@ -40,7 +41,13 @@ fun MarketplaceView(viewModel: TerminalViewModel) {
 
     var selectedTab by remember { mutableStateOf(MarketplaceTab.EXTENSIONS) }
     var searchQuery by remember { mutableStateOf("") }
+    val isBetaMode by viewModel.isBetaMode.collectAsState()
 
+    LaunchedEffect(isBetaMode) {
+        if (!isBetaMode) {
+            selectedTab = MarketplaceTab.EXTENSIONS
+        }
+    }
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -139,7 +146,7 @@ fun MarketplaceView(viewModel: TerminalViewModel) {
                                 Text(
                                     when (selectedTab) {
                                         MarketplaceTab.EXTENSIONS -> "Search extensions..."
-                                        MarketplaceTab.RUNTIMES   -> "Search Node.js versions..."
+                                        MarketplaceTab.RUNTIMES   -> "Search runtimes..."
                                     },
                                     color = Color(0xFF6E7681),
                                     fontSize = (12 * uiScale).sp
@@ -154,45 +161,47 @@ fun MarketplaceView(viewModel: TerminalViewModel) {
             Spacer(Modifier.height((8 * uiScale).dp))
 
             // ── Tab row ───────────────────────────────────────────────────────
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape((6 * uiScale).dp))
-                    .background(Color(0xFF161B22))
-                    .padding((3 * uiScale).dp),
-                horizontalArrangement = Arrangement.spacedBy((3 * uiScale).dp)
-            ) {
-                MarketplaceTab.values().forEach { tab ->
-                    val selected = selectedTab == tab
-                    Box(
-                        modifier = Modifier
-                            .weight(1f)
-                            .clip(RoundedCornerShape((4 * uiScale).dp))
-                            .background(if (selected) Color(0xFF21262D) else Color.Transparent)
-                            .clickable { selectedTab = tab; searchQuery = "" }
-                            .padding(vertical = (5 * uiScale).dp),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(
-                                imageVector = when (tab) {
-                                    MarketplaceTab.EXTENSIONS -> Icons.Default.Extension
-                                    MarketplaceTab.RUNTIMES   -> Icons.Default.SettingsEthernet
-                                },
-                                contentDescription = null,
-                                tint = if (selected) Color(0xFF58A6FF) else Color.Gray,
-                                modifier = Modifier.size((12 * uiScale).dp)
-                            )
-                            Spacer(Modifier.width((4 * uiScale).dp))
-                            Text(
-                                when (tab) {
-                                    MarketplaceTab.EXTENSIONS -> "Extensions"
-                                    MarketplaceTab.RUNTIMES   -> "Node.js"
-                                },
-                                color = if (selected) Color.White else Color.Gray,
-                                fontSize = (11 * uiScale).sp,
-                                fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal
-                            )
+            if (isBetaMode) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape((6 * uiScale).dp))
+                        .background(Color(0xFF161B22))
+                        .padding((3 * uiScale).dp),
+                    horizontalArrangement = Arrangement.spacedBy((3 * uiScale).dp)
+                ) {
+                    MarketplaceTab.values().forEach { tab ->
+                        val selected = selectedTab == tab
+                        Box(
+                            modifier = Modifier
+                                .weight(1f)
+                                .clip(RoundedCornerShape((4 * uiScale).dp))
+                                .background(if (selected) Color(0xFF21262D) else Color.Transparent)
+                                .clickable { selectedTab = tab; searchQuery = "" }
+                                .padding(vertical = (5 * uiScale).dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(
+                                    imageVector = when (tab) {
+                                        MarketplaceTab.EXTENSIONS -> Icons.Default.Extension
+                                        MarketplaceTab.RUNTIMES   -> Icons.Default.SettingsEthernet
+                                    },
+                                    contentDescription = null,
+                                    tint = if (selected) Color(0xFF58A6FF) else Color.Gray,
+                                    modifier = Modifier.size((12 * uiScale).dp)
+                                )
+                                Spacer(Modifier.width((4 * uiScale).dp))
+                                Text(
+                                    when (tab) {
+                                        MarketplaceTab.EXTENSIONS -> "Extensions"
+                                        MarketplaceTab.RUNTIMES   -> "Runtimes"
+                                    },
+                                    color = if (selected) Color.White else Color.Gray,
+                                    fontSize = (11 * uiScale).sp,
+                                    fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal
+                                )
+                            }
                         }
                     }
                 }
@@ -268,8 +277,10 @@ private fun ExtensionsTab(viewModel: TerminalViewModel, uiScale: Float, searchQu
 @Composable
 private fun RuntimesTab(viewModel: TerminalViewModel, uiScale: Float, searchQuery: String) {
     val versions by viewModel.binaryManager.availableVersions.collectAsState()
+    val toolMetas by viewModel.binaryManager.toolMetas.collectAsState()
     val isSyncing by viewModel.binaryManager.isSyncing.collectAsState()
     val downloadProgress by viewModel.binaryManager.downloadProgress.collectAsState()
+    val verifiedVersions by viewModel.binaryManager.verifiedVersions.collectAsState()
     val scope = rememberCoroutineScope()
 
     LaunchedEffect(Unit) {
@@ -288,8 +299,8 @@ private fun RuntimesTab(viewModel: TerminalViewModel, uiScale: Float, searchQuer
         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
                 CircularProgressIndicator(color = Color(0xFF58A6FF))
-                Spacer(Modifier.height(12.dp))
-                Text("Fetching Node.js versions...", color = Color.Gray, fontSize = 13.sp)
+                Spacer(Modifier.height((12 * uiScale).dp))
+                Text("Fetching Node.js versions...", color = Color.Gray, fontSize = (13 * uiScale).sp)
             }
         }
         return
@@ -299,55 +310,101 @@ private fun RuntimesTab(viewModel: TerminalViewModel, uiScale: Float, searchQuer
         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
             Text(
                 if (searchQuery.isBlank()) "No versions found" else "No results for \"$searchQuery\"",
-                color = Color.Gray
+                color = Color.Gray,
+                fontSize = (13 * uiScale).sp
             )
         }
         return
     }
 
+    // Group versions by tool for registry-driven sections
+    val grouped = remember(filtered, toolMetas) {
+        filtered.groupBy { it.tool }
+    }
+    val metaMap = remember(toolMetas) { toolMetas.associateBy { it.id } }
+
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(16.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp)
+        contentPadding = PaddingValues(horizontal = (10 * uiScale).dp, vertical = (12 * uiScale).dp),
+        verticalArrangement = Arrangement.spacedBy((10 * uiScale).dp)
     ) {
-        // Section header
-        item {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(
-                    Icons.Default.SettingsEthernet,
-                    contentDescription = null,
-                    tint = Color(0xFF58A6FF),
-                    modifier = Modifier.size(16.dp)
-                )
-                Spacer(Modifier.width(8.dp))
-                Text(
-                    "Node.js Runtimes",
-                    color = Color.White,
-                    fontSize = 13.sp,
-                    fontWeight = FontWeight.Bold
-                )
-                Spacer(Modifier.width(8.dp))
-                Text(
-                    "${filtered.size} version${if (filtered.size != 1) "s" else ""}",
-                    color = Color.Gray,
-                    fontSize = 11.sp
+        grouped.forEach { (toolName, toolVersions) ->
+            val meta = metaMap[toolName]
+            // Tool section header
+            item(key = "header_$toolName") {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.padding(top = (8 * uiScale).dp, bottom = (2 * uiScale).dp)
+                ) {
+                    // Tool icon from registry
+                    Box(
+                        modifier = Modifier
+                            .size((22 * uiScale).dp)
+                            .clip(RoundedCornerShape((5 * uiScale).dp))
+                            .background(Color(0xFF21262D)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        if (meta?.iconUrl?.isNotEmpty() == true) {
+                            AsyncImage(
+                                model = meta.iconUrl,
+                                contentDescription = null,
+                                modifier = Modifier.fillMaxSize(),
+                                contentScale = ContentScale.Crop
+                            )
+                        } else {
+                            Icon(Icons.Default.SettingsEthernet, null,
+                                tint = Color(0xFF58A6FF),
+                                modifier = Modifier.size((13 * uiScale).dp))
+                        }
+                    }
+                    Spacer(Modifier.width((6 * uiScale).dp))
+                    Text(
+                        meta?.displayName ?: toolName,
+                        color = Color.White,
+                        fontSize = (13 * uiScale).sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Spacer(Modifier.width((6 * uiScale).dp))
+                    if (meta?.category?.isNotEmpty() == true) {
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape((4 * uiScale).dp))
+                                .background(Color(0xFF1F6FEB).copy(alpha = 0.15f))
+                                .padding(horizontal = (5 * uiScale).dp, vertical = (1 * uiScale).dp)
+                        ) {
+                            Text(meta.category, color = Color(0xFF58A6FF),
+                                fontSize = (9 * uiScale).sp, fontWeight = FontWeight.SemiBold)
+                        }
+                    }
+                }
+            }
+            items(toolVersions, key = { "${it.tool}_${it.version}" }) { ver ->
+                RuntimeCard(
+                    ver = ver,
+                    toolIconUrl = meta?.iconUrl ?: "",
+                    progress = downloadProgress[ver.version],
+                    verifiedVersion = verifiedVersions[ver.tool],
+                    uiScale = uiScale,
+                    onDownload = {
+                        scope.launch {
+                            viewModel.binaryManager.downloadVersion(ver.tool, ver.version, ver.downloadUrl, ver.sha256)
+                        }
+                    },
+                    onActivate = {
+                        scope.launch {
+                            try {
+                                viewModel.binaryManager.setActiveVersion(ver.tool, ver.version)
+                            } catch (e: Exception) {
+                                android.widget.Toast.makeText(
+                                    viewModel.getApplication(),
+                                    "⚠️ ${e.message ?: "Failed to activate"}",
+                                    android.widget.Toast.LENGTH_LONG
+                                ).show()
+                            }
+                        }
+                    }
                 )
             }
-        }
-
-        items(filtered) { ver ->
-            RuntimeCard(
-                ver = ver,
-                progress = downloadProgress[ver.version],
-                onDownload = {
-                    scope.launch {
-                        viewModel.binaryManager.downloadVersion(ver.tool, ver.version, ver.downloadUrl)
-                    }
-                },
-                onActivate = {
-                    viewModel.binaryManager.setActiveVersion(ver.tool, ver.version)
-                }
-            )
         }
     }
 }
@@ -355,143 +412,249 @@ private fun RuntimesTab(viewModel: TerminalViewModel, uiScale: Float, searchQuer
 @Composable
 private fun RuntimeCard(
     ver: BinaryManager.RemoteVersion,
+    toolIconUrl: String,
     progress: Float?,
+    verifiedVersion: VersionChecker.VerifiedVersion?,
+    uiScale: Float,
     onDownload: () -> Unit,
     onActivate: () -> Unit
 ) {
     val tagColor = when {
-        ver.tag.contains("Current", ignoreCase = true) -> Color(0xFF238636)
-        ver.tag.contains("LTS",     ignoreCase = true) -> Color(0xFF1F6FEB)
-        ver.tag.contains("Bundled", ignoreCase = true) -> Color(0xFF58A6FF)
+        ver.tag.contains("Current",   ignoreCase = true) -> Color(0xFF238636)
+        ver.tag.contains("LTS",       ignoreCase = true) -> Color(0xFF1F6FEB)
+        ver.tag.contains("Bundled",   ignoreCase = true) -> Color(0xFF58A6FF)
+        ver.tag.contains("Jod",       ignoreCase = true) ||
+        ver.tag.contains("Iron",      ignoreCase = true) ||
+        ver.tag.contains("Hydrogen",  ignoreCase = true) -> Color(0xFFBB8009)
         else -> Color(0xFF6E7681)
     }
 
     Card(
         modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(containerColor = Color(0xFF161B22)),
-        shape = RoundedCornerShape(10.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = if (ver.isUnavailable) Color(0xFF0D1117) else Color(0xFF161B22)
+        ),
+        shape = RoundedCornerShape((8 * uiScale).dp),
         border = BorderStroke(
             width = 1.dp,
             color = when {
-                ver.isActive     -> Color(0xFF238636)
-                progress != null -> Color(0xFF1F6FEB)
-                else             -> Color(0xFF30363D)
+                ver.isUnavailable -> Color(0xFF21262D)
+                ver.isActive      -> Color(0xFF238636)
+                progress != null  -> Color(0xFF1F6FEB)
+                else              -> Color(0xFF30363D)
             }
         )
     ) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 12.dp, vertical = 12.dp),
+                .padding(horizontal = (10 * uiScale).dp, vertical = (10 * uiScale).dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            // Icon box
+            // Tool icon — from registry iconUrl, falls back to emoji
             Box(
                 modifier = Modifier
-                    .size(38.dp)
-                    .clip(RoundedCornerShape(8.dp))
+                    .size((34 * uiScale).dp)
+                    .clip(RoundedCornerShape((6 * uiScale).dp))
                     .background(Color(0xFF21262D)),
                 contentAlignment = Alignment.Center
             ) {
-                Text("⬡", color = Color(0xFF68A063), fontSize = 16.sp)
+                if (toolIconUrl.isNotEmpty() && !ver.isUnavailable) {
+                    AsyncImage(
+                        model = toolIconUrl,
+                        contentDescription = null,
+                        modifier = Modifier.fillMaxSize().clip(RoundedCornerShape((6 * uiScale).dp)),
+                        contentScale = ContentScale.Crop
+                    )
+                } else {
+                    Text(
+                        "⬡",
+                        color = if (ver.isUnavailable) Color(0xFF3D4047) else Color(0xFF68A063),
+                        fontSize = (14 * uiScale).sp
+                    )
+                }
             }
 
-            Spacer(Modifier.width(10.dp))
+            Spacer(Modifier.width((8 * uiScale).dp))
 
             // Text column — weight(1f) prevents overflow into button area
             Column(modifier = Modifier.weight(1f)) {
                 Text(
-                    text = "Node.js v${ver.version}",
-                    color = Color.White,
-                    fontSize = 13.sp,
+                    text = if (ver.isUnavailable) ver.tag else "v${ver.version}",
+                    color = if (ver.isUnavailable) Color(0xFF484F58) else Color.White,
+                    fontSize = (13 * uiScale).sp,
                     fontWeight = FontWeight.Bold,
                     maxLines = 1,
+                    softWrap = false,
                     overflow = TextOverflow.Ellipsis
                 )
-                Spacer(Modifier.height(3.dp))
+                Spacer(Modifier.height((2 * uiScale).dp))
                 // Badges on their own row — never squeeze the title
-                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy((4 * uiScale).dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
                     Box(
                         modifier = Modifier
-                            .clip(RoundedCornerShape(4.dp))
-                            .background(tagColor.copy(alpha = 0.18f))
-                            .padding(horizontal = 5.dp, vertical = 2.dp)
+                            .clip(RoundedCornerShape((4 * uiScale).dp))
+                            .background(tagColor.copy(alpha = if (ver.isUnavailable) 0.08f else 0.18f))
+                            .padding(horizontal = (5 * uiScale).dp, vertical = (2 * uiScale).dp)
                     ) {
-                        Text(ver.tag, color = tagColor, fontSize = 9.sp, fontWeight = FontWeight.SemiBold)
+                        Text(
+                            text = ver.tag,
+                            color = if (ver.isUnavailable) tagColor.copy(alpha = 0.45f) else tagColor,
+                            fontSize = (9 * uiScale).sp,
+                            fontWeight = FontWeight.SemiBold,
+                            maxLines = 1,
+                            softWrap = false
+                        )
                     }
                     if (ver.isActive) {
                         Box(
                             modifier = Modifier
-                                .clip(RoundedCornerShape(4.dp))
+                                .clip(RoundedCornerShape((4 * uiScale).dp))
                                 .background(Color(0xFF238636).copy(alpha = 0.18f))
-                                .padding(horizontal = 5.dp, vertical = 2.dp)
+                                .padding(horizontal = (5 * uiScale).dp, vertical = (2 * uiScale).dp)
                         ) {
-                            Text("ACTIVE", color = Color(0xFF3FB950), fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                            Text(
+                                text = "ACTIVE",
+                                color = Color(0xFF3FB950),
+                                fontSize = (9 * uiScale).sp,
+                                fontWeight = FontWeight.Bold,
+                                maxLines = 1,
+                                softWrap = false
+                            )
                         }
                     }
                 }
-                Spacer(Modifier.height(3.dp))
+                Spacer(Modifier.height((2 * uiScale).dp))
                 Text(
                     text = when {
-                        ver.isActive    -> "Currently active runtime"
-                        ver.isInstalled -> "Installed — tap to activate"
-                        else            -> "Available for download"
+                        ver.isUnavailable -> "Not yet available"
+                        ver.isActive      -> "Active"
+                        ver.isInstalled   -> "Installed"
+                        else              -> "Available"
                     },
-                    color = Color.Gray,
-                    fontSize = 10.sp,
+                    color = if (ver.isUnavailable) Color(0xFF3D4047) else Color.Gray,
+                    fontSize = (9 * uiScale).sp,
                     maxLines = 1,
+                    softWrap = false,
                     overflow = TextOverflow.Ellipsis
                 )
+                // Note text for unavailable slots
+                if (ver.isUnavailable && ver.note.isNotEmpty()) {
+                    Spacer(Modifier.height((3 * uiScale).dp))
+                    Text(
+                        text = ver.note,
+                        color = Color(0xFF3D4047),
+                        fontSize = (8 * uiScale).sp,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+                // Verification chip — only show when the checked version matches THIS card
+                // Keyed by tool, so we must compare version strings to avoid cross-card bleed
+                val isThisVersionVerified = verifiedVersion != null &&
+                    verifiedVersion.version.trimStart('v') == ver.version.trimStart('v')
+                if (ver.isInstalled && isThisVersionVerified) {
+                    Spacer(Modifier.height((4 * uiScale).dp))
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy((3 * uiScale).dp)
+                    ) {
+                        if (verifiedVersion!!.isVerified) {
+                            Box(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape((3 * uiScale).dp))
+                                    .background(Color(0xFF238636).copy(alpha = 0.18f))
+                                    .padding(horizontal = (5 * uiScale).dp, vertical = (2 * uiScale).dp)
+                            ) {
+                                Text(
+                                    text = "✓ ${verifiedVersion.version}",
+                                    color = Color(0xFF3FB950),
+                                    fontSize = (9 * uiScale).sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    maxLines = 1,
+                                    softWrap = false
+                                )
+                            }
+                        } else {
+                            Box(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape((3 * uiScale).dp))
+                                    .background(Color(0xFFB08800).copy(alpha = 0.18f))
+                                    .padding(horizontal = (5 * uiScale).dp, vertical = (2 * uiScale).dp)
+                            ) {
+                                Text(
+                                    text = "⚠ ${verifiedVersion.errorReason ?: "Failed"}",
+                                    color = Color(0xFFD29922),
+                                    fontSize = (9 * uiScale).sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    maxLines = 1,
+                                    softWrap = false
+                                )
+                            }
+                        }
+                    }
+                }
                 if (progress != null) {
-                    Spacer(Modifier.height(6.dp))
+                    Spacer(Modifier.height((6 * uiScale).dp))
                     LinearProgressIndicator(
                         progress = progress,
-                        modifier = Modifier.fillMaxWidth().height(3.dp).clip(RoundedCornerShape(2.dp)),
+                        modifier = Modifier.fillMaxWidth().height((3 * uiScale).dp).clip(RoundedCornerShape((2 * uiScale).dp)),
                         color = Color(0xFF58A6FF),
                         trackColor = Color(0xFF30363D)
                     )
                     Text(
-                        "Downloading… ${(progress * 100).toInt()}%",
+                        "Downloading\u2026 ${(progress * 100).toInt()}%",
                         color = Color(0xFF58A6FF),
-                        fontSize = 10.sp
+                        fontSize = (9 * uiScale).sp,
+                        maxLines = 1,
+                        softWrap = false
                     )
                 }
             }
 
-            Spacer(Modifier.width(8.dp))
+            Spacer(Modifier.width((8 * uiScale).dp))
 
             // Fixed-size action — never pushes text column
             when {
+                ver.isUnavailable -> Icon(
+                    Icons.Default.Lock,
+                    contentDescription = "Unavailable",
+                    tint = Color(0xFF3D4047),
+                    modifier = Modifier.size((18 * uiScale).dp)
+                )
                 progress != null -> CircularProgressIndicator(
-                    modifier = Modifier.size(22.dp),
+                    modifier = Modifier.size((20 * uiScale).dp),
                     color = Color(0xFF58A6FF),
-                    strokeWidth = 2.dp
+                    strokeWidth = (2 * uiScale).dp
                 )
                 ver.isActive -> Icon(
                     Icons.Default.CheckCircle,
                     contentDescription = "Active",
                     tint = Color(0xFF3FB950),
-                    modifier = Modifier.size(22.dp)
+                    modifier = Modifier.size((20 * uiScale).dp)
                 )
                 ver.isInstalled -> Button(
                     onClick = onActivate,
                     colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1F6FEB)),
-                    shape = RoundedCornerShape(6.dp),
-                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 0.dp),
-                    modifier = Modifier.height(28.dp)
+                    shape = RoundedCornerShape((4 * uiScale).dp),
+                    contentPadding = PaddingValues(horizontal = (8 * uiScale).dp, vertical = 0.dp),
+                    modifier = Modifier.height((24 * uiScale).dp)
                 ) {
-                    Text("Use", fontSize = 11.sp, color = Color.White, fontWeight = FontWeight.SemiBold)
+                    Text("Use", fontSize = (10 * uiScale).sp, color = Color.White, fontWeight = FontWeight.SemiBold)
                 }
                 else -> Button(
                     onClick = onDownload,
                     colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF238636)),
-                    shape = RoundedCornerShape(6.dp),
-                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
-                    modifier = Modifier.height(28.dp)
+                    shape = RoundedCornerShape((4 * uiScale).dp),
+                    contentPadding = PaddingValues(horizontal = (6 * uiScale).dp, vertical = 0.dp),
+                    modifier = Modifier.height((24 * uiScale).dp)
                 ) {
-                    Icon(Icons.Default.Download, null, modifier = Modifier.size(11.dp), tint = Color.White)
-                    Spacer(Modifier.width(3.dp))
-                    Text("Get", fontSize = 11.sp, color = Color.White, fontWeight = FontWeight.SemiBold)
+                    Icon(Icons.Default.Download, null, modifier = Modifier.size((10 * uiScale).dp), tint = Color.White)
+                    Spacer(Modifier.width((3 * uiScale).dp))
+                    Text("Get", fontSize = (10 * uiScale).sp, color = Color.White, fontWeight = FontWeight.SemiBold)
                 }
             }
         }

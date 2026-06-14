@@ -24,6 +24,13 @@ object ZipUtils {
             var entry = zis.nextEntry
             while (entry != null) {
                 val newFile = File(targetDir, entry.name)
+                val canonicalTargetDir = targetDir.canonicalPath
+                val canonicalDestFile = newFile.canonicalPath
+                
+                if (!canonicalDestFile.startsWith(canonicalTargetDir + File.separator)) {
+                    throw SecurityException("Zip Slip vulnerability detected: ${entry.name}")
+                }
+
                 if (entry.isDirectory) {
                     newFile.mkdirs()
                 } else {

@@ -44,6 +44,10 @@ object NativeLibLoader {
                             input.copyTo(output)
                         }
                     }
+                    
+                    // Security Fix: Prevent Native Library Injection
+                    dstFile.setWritable(false, false)
+                    dstFile.setExecutable(true, false)
                 }
                 stampFile.writeText(versionStamp)
             }

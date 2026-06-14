@@ -11,8 +11,10 @@ import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import com.kodrix.zohaib.beta.BetaFlags
 import com.kodrix.zohaib.bridge.GitBridge
 import com.kodrix.zohaib.bridge.PtyBridge
+import com.kodrix.zohaib.bridge.VersionChecker
 import com.kodrix.zohaib.bridge.ZipUtils
 import com.kodrix.zohaib.model.TerminalInstance
 import com.kodrix.zohaib.lsp.LspClient
@@ -60,9 +62,11 @@ data class ForwardedPort(val port: Int, val url: String, val process: Process)
 
 class TerminalViewModel(application: Application) : AndroidViewModel(application) {
     private val prefs = application.getSharedPreferences("kodrix_settings", android.content.Context.MODE_PRIVATE)
-    private val _nodeVersion = MutableStateFlow(prefs.getString("node_version", "25.8.2 (bundled)") ?: "25.8.2 (bundled)")
+    // Node/git version strings — populated by VersionChecker, not hardcoded.
+    // Start as "Checking…" so the UI shows something while VersionChecker runs.
+    private val _nodeVersion = MutableStateFlow("Checking…")
     val nodeVersion = _nodeVersion.asStateFlow()
-    private val _gitVersion = MutableStateFlow(prefs.getString("git_version", "2.x (bundled)") ?: "2.x (bundled)")
+    private val _gitVersion = MutableStateFlow("2.x (bundled)")
     val gitVersion = _gitVersion.asStateFlow()
     private val _instances = MutableStateFlow<List<TerminalInstance>>(emptyList())
     val instances = _instances.asStateFlow()
@@ -312,18 +316,64 @@ class TerminalViewModel(application: Application) : AndroidViewModel(application
             }
         }
 
-        // Keep _nodeVersion in sync with BinaryManager active choice
+        // Keep _nodeVersion and _gitVersion in sync with VersionChecker verified results.
         viewModelScope.launch {
-            binaryManager.availableVersions.collect { versions ->
-                val active = versions.find { it.isActive }
-                if (active != null) {
-                    if (active.version == "25.8.2") {
-                        _nodeVersion.value = "25.8.2 (bundled)"
+            binaryManager.verifiedVersions.collect { verified ->
+                // Node
+                val nodeVerified = verified["node"]
+                if (nodeVerified != null) {
+                    _nodeVersion.value = if (nodeVerified.isVerified) {
+                        nodeVerified.version
                     } else {
-                        _nodeVersion.value = active.version
+                        "${nodeVerified.version} (unverified)"
                     }
                 } else {
-                    _nodeVersion.value = "25.8.2 (bundled)"
+                    // VersionChecker hasn't run yet — use the active label from BinaryManager if available
+                    val active = binaryManager.availableVersions.value.find { it.isActive && it.tool == "node" }
+                    _nodeVersion.value = if (active != null && active.version != "25.8.2") {
+                        active.version
+                    } else {
+                        "Checking…"
+                    }
+                }
+
+                // Git
+                val gitVerified = verified["git"]
+                if (gitVerified != null) {
+                    _gitVersion.value = if (gitVerified.isVerified) {
+                        gitVerified.version
+                    } else {
+                        "${gitVerified.version} (unverified)"
+                    }
+                } else {
+                    _gitVersion.value = "Checking…"
+                }
+            }
+        }
+
+        // Dynamically run version check on startup for the active binaries instead of hardcoding
+        viewModelScope.launch {
+            // Node check
+            val nodeBin = findBinary(application.filesDir, "node")
+            val activeNodeVer = binaryManager.getActiveVersion("node") ?: "25.8.2"
+            if (nodeBin != null) {
+                VersionChecker.check("node", expectedVersion = activeNodeVer, binaryPath = nodeBin.absolutePath, context = application)
+            } else {
+                val bundledNode = java.io.File(application.filesDir, "usr/bin/node")
+                if (bundledNode.exists()) {
+                    VersionChecker.check("node", expectedVersion = "25.8.2", binaryPath = bundledNode.absolutePath, context = application)
+                }
+            }
+
+            // Git check
+            val gitBin = findBinary(application.filesDir, "git")
+            val activeGitVer = binaryManager.getActiveVersion("git") ?: "2.34.0"
+            if (gitBin != null) {
+                VersionChecker.check("git", expectedVersion = activeGitVer, binaryPath = gitBin.absolutePath, context = application)
+            } else {
+                val bundledGit = java.io.File(application.filesDir, "usr/bin/git")
+                if (bundledGit.exists()) {
+                    VersionChecker.check("git", expectedVersion = "2.34.0", binaryPath = bundledGit.absolutePath, context = application)
                 }
             }
         }
@@ -372,6 +422,48 @@ class TerminalViewModel(application: Application) : AndroidViewModel(application
     fun updateLineNumbers(show: Boolean) {
         _showLineNumbers.value = show
         prefs.edit().putBoolean("show_line_numbers", show).apply()
+    }
+
+    // ── Safe Mode (Emergency Rollback) ─────────────────────────────────────────
+    private val _isSafeMode = MutableStateFlow(prefs.getBoolean("safe_mode", false))
+    val isSafeMode = _isSafeMode.asStateFlow()
+
+    /**
+     * Enables or disables Safe Mode.
+     *
+     * Safe Mode routes the terminal's $PATH to usr/bin_safe/ — a static directory of
+     * bundled-only wrappers that is NEVER touched by WrapperManager. This gives the user
+     * a guaranteed recovery path if a downloaded runtime corrupts the dynamic wrappers.
+     *
+     * The flag is written as a physical file (filesDir/safe_mode) so PtyBridge can
+     * read it with a shell `[ -f ... ]` check at terminal session startup — no JVM call needed.
+     */
+    fun setSafeMode(enabled: Boolean) {
+        _isSafeMode.value = enabled
+        prefs.edit().putBoolean("safe_mode", enabled).apply()
+        val flagFile = java.io.File(getApplication<Application>().filesDir, "safe_mode")
+        if (enabled) {
+            flagFile.writeText("1")
+        } else {
+            flagFile.takeIf { it.exists() }?.delete()
+        }
+    }
+
+    // ── Beta Mode ─────────────────────────────────────────────────────────────
+    //
+    // Unlocks features listed in BetaFlags.kt that are under active testing.
+    // Off by default — users opt in from Settings → Developer → Beta Mode.
+
+    private val _isBetaMode = MutableStateFlow(prefs.getBoolean("beta_mode", false))
+    val isBetaMode = _isBetaMode.asStateFlow()
+
+    /** Returns true if [flag] is enabled AND the user has turned on Beta Mode. */
+    fun isBetaFeatureEnabled(flag: Boolean): Boolean = _isBetaMode.value && flag
+
+    fun setBetaMode(enabled: Boolean) {
+        _isBetaMode.value = enabled
+        prefs.edit().putBoolean("beta_mode", enabled).apply()
+        android.util.Log.i("BetaMode", "Beta Mode ${if (enabled) "ENABLED" else "DISABLED"}")
     }
 
     private fun getLanguageId(extension: String) = when (extension.lowercase()) {
@@ -790,13 +882,22 @@ class TerminalViewModel(application: Application) : AndroidViewModel(application
         _ghDeviceCode.value = null
     }
 
+    private var oauthStateToken: String? = null
+
     fun loginGithub() {
         val clientId = "Ov23liGDwcWLayi70rk2"
         val redirectUri = "kodrix://github-auth"
-        val url = "https://github.com/login/oauth/authorize?client_id=$clientId&scope=repo,user&redirect_uri=$redirectUri"
+        oauthStateToken = java.util.UUID.randomUUID().toString()
+        val url = "https://github.com/login/oauth/authorize?client_id=$clientId&scope=repo,user&redirect_uri=$redirectUri&state=$oauthStateToken"
         val intent = android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(url))
         intent.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
         getApplication<Application>().startActivity(intent)
+    }
+
+    fun verifyAuthState(state: String): Boolean {
+        val isValid = state == oauthStateToken && oauthStateToken != null
+        oauthStateToken = null // Prevent replay
+        return isValid
     }
 
     fun handleGithubCallback(code: String) {
@@ -1056,11 +1157,13 @@ class TerminalViewModel(application: Application) : AndroidViewModel(application
             val findCmd = listOf("/system/bin/find", filesDir.absolutePath,
                 "-maxdepth", "6", "-name", binaryName, "-type", "f")
             Log.d("Kodrix", "findBinary: running fallback find: ${findCmd.joinToString(" ")}")
-            val pb = ProcessBuilder(findCmd)
-            pb.redirectErrorStream(true)
-            val result = pb.start().inputStream.bufferedReader().readLine()
+            val result = ProcessBuilder(findCmd).redirectErrorStream(true).start().inputStream.bufferedReader().lineSequence()
+                .map { it.trim() }
+                .firstOrNull { line ->
+                    line.isNotEmpty() && !line.contains("usr/bin_safe")
+                }
             if (!result.isNullOrBlank()) {
-                val f = java.io.File(result.trim())
+                val f = java.io.File(result)
                 Log.d("Kodrix", "findBinary: $binaryName found at ${f.absolutePath} (find scan)")
                 f
             } else {
@@ -1400,8 +1503,16 @@ class TerminalViewModel(application: Application) : AndroidViewModel(application
                 while (isActive) {
                     line = reader.readLine()
                     if (line != null) {
+                        // Security Mitigation: Drop noisy and sensitive Firebase/Google Services logs
+                        if (line.contains("Firebase", ignoreCase = true) || line.contains("google-services", ignoreCase = true)) {
+                            continue
+                        }
+                        
+                        // Redact any stray Google API keys from the logcat stream
+                        val sanitizedLine = line.replace(Regex("AIza[0-9A-Za-z-_]{35}"), "[REDACTED_API_KEY]")
+
                         val currentList = _logcatOutput.value.toMutableList()
-                        currentList.add(line)
+                        currentList.add(sanitizedLine)
                         if (currentList.size > 500) currentList.removeAt(0)
                         _logcatOutput.value = currentList
                     } else {
@@ -2238,7 +2349,7 @@ class TerminalViewModel(application: Application) : AndroidViewModel(application
         val projDir = java.io.File(projectsRoot, name)
         refreshFileTree(projDir)
         viewModelScope.launch(Dispatchers.IO) {
-            _instances.value.forEach { it.sendInput("cd \"${projDir.absolutePath}\"\n") }
+            _instances.value.forEach { it.sendInput("\r\ncd \"${projDir.absolutePath}\"\n") }
         }
         refreshGitStatus()
     }
@@ -2693,7 +2804,7 @@ class TerminalViewModel(application: Application) : AndroidViewModel(application
         val dir = if (file.isDirectory) file else file.parentFile ?: return
         togglePanel(true)
         viewModelScope.launch(Dispatchers.IO) {
-            _instances.value.getOrNull(_activeInstanceIndex.value)?.sendInput("cd \"${dir.absolutePath}\"\n")
+            _instances.value.getOrNull(_activeInstanceIndex.value)?.sendInput("\r\ncd \"${dir.absolutePath}\"\n")
         }
     }
 

@@ -153,6 +153,10 @@ object ExtensionManager {
                     extension.downloadUrl
                 }
 
+                if (!downloadUrl.startsWith("https://github.com/") && !downloadUrl.startsWith("https://raw.githubusercontent.com/")) {
+                    throw SecurityException("Invalid download URL domain: $downloadUrl")
+                }
+
                 val url = URL(downloadUrl)
                 val connection = url.openConnection() as HttpURLConnection
                 connection.setRequestProperty("User-Agent", "Kodrix-Android-App")
@@ -221,6 +225,13 @@ object ExtensionManager {
                     val relativeName = pathAfterRoot.removePrefix(internalPath).removePrefix("/")
                     if (relativeName.isNotEmpty()) {
                         val newFile = File(targetDir, relativeName)
+                        val canonicalTargetDir = targetDir.canonicalPath
+                        val canonicalDestFile = newFile.canonicalPath
+                        
+                        if (!canonicalDestFile.startsWith(canonicalTargetDir + File.separator)) {
+                            throw SecurityException("Zip Slip vulnerability detected: $name")
+                        }
+
                         if (entry.isDirectory) {
                             newFile.mkdirs()
                         } else {

@@ -80,9 +80,14 @@ class MainActivity : ComponentActivity() {
         intent?.data?.let { uri ->
             if (uri.scheme == "kodrix" && uri.host == "github-auth") {
                 val code = uri.getQueryParameter("code")
-                if (code != null && ::viewModel.isInitialized) {
-                    android.widget.Toast.makeText(this, "Auth code captured!", android.widget.Toast.LENGTH_SHORT).show()
-                    viewModel.handleGithubCallback(code)
+                val state = uri.getQueryParameter("state")
+                if (code != null && state != null && ::viewModel.isInitialized) {
+                    if (viewModel.verifyAuthState(state)) {
+                        android.widget.Toast.makeText(this, "Auth code captured!", android.widget.Toast.LENGTH_SHORT).show()
+                        viewModel.handleGithubCallback(code)
+                    } else {
+                        android.widget.Toast.makeText(this, "Security Error: Invalid OAuth State", android.widget.Toast.LENGTH_LONG).show()
+                    }
                 }
             }
         }

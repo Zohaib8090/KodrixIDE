@@ -2,6 +2,7 @@ plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
     id("com.google.gms.google-services")
+    id("com.google.firebase.crashlytics")
     id("org.jetbrains.kotlin.plugin.compose")
 }
 
@@ -87,6 +88,7 @@ dependencies {
     implementation("androidx.compose.ui:ui-tooling-preview")
     implementation("androidx.compose.material3:material3")
     implementation("androidx.compose.material:material-icons-extended")
+    implementation("androidx.security:security-crypto:1.1.0-alpha06")
     
     // Core Coroutines for LSP/Terminal
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3")
@@ -95,6 +97,11 @@ dependencies {
     implementation("com.github.termux.termux-app:terminal-view:v0.118.0")
     implementation("com.github.termux.termux-app:terminal-emulator:v0.118.0")
     implementation("com.google.guava:guava:32.0.1-android")
+
+    // Firebase
+    implementation(platform("com.google.firebase:firebase-bom:33.7.0"))
+    implementation("com.google.firebase:firebase-crashlytics")
+    implementation("com.google.firebase:firebase-analytics")
 
     testImplementation("junit:junit:4.13.2")
     androidTestImplementation("androidx.test.ext:junit:1.1.5")

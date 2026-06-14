@@ -89,7 +89,7 @@ class PtyBridge {
 
     private fun extractNpmIfNeeded(context: android.content.Context) {
         val npmDir = java.io.File(context.filesDir, "npm_pkg")
-        val stampFile = java.io.File(npmDir, ".extracted_v3")
+        val stampFile = java.io.File(npmDir, ".extracted_v4")
         if (stampFile.exists()) return
         if (npmDir.exists()) npmDir.deleteRecursively()
         npmDir.mkdirs()
@@ -587,8 +587,7 @@ class PtyBridge {
                     }
                     return result;
                 };
-                // MUST use process.stderr.write — console.error/log can leak to stdout in some envs
-                process.stderr.write("[CodeOSS] Android Native Fixes v12 Applied (PID: " + process.pid + ")\n");
+
             """.trimIndent()
 
             java.io.FileOutputStream(dnsOverride).use { it.write(dnsContent.toByteArray()) }
@@ -601,7 +600,17 @@ class PtyBridge {
             export HOME="$filesDir"
             export TMPDIR="$tmpDir"
             export PREFIX="$usrDir"
-            export PATH="$usrBinDir:/system/bin:/system/xbin"
+
+            # ── Safe Mode / Emergency Rollback ────────────────────────────────
+            # If the safe_mode flag file exists, route PATH to the static bundled-only
+            # wrappers in usr/bin_safe/ instead of the dynamic usr/bin/ directory.
+            # This lets the user recover from a broken runtime without losing terminal access.
+            if [ -f "$filesDir/safe_mode" ]; then
+                export PATH="$filesDir/usr/bin_safe:/system/bin:/system/xbin"
+                echo "⚠️  Safe Mode active — using bundled runtimes only. Disable in Settings → Environment."
+            else
+                export PATH="$usrBinDir:/system/bin:/system/xbin"
+            fi
             export OPENSSL_CONF="/dev/null"
             export RESOLV_CONF="$usrEtcDir/resolv.conf"
             export GIT_SSL_NO_VERIFY=true
@@ -629,91 +638,8 @@ class PtyBridge {
             export NEXT_OTEL_FETCH_DISABLED=1
             export NEXT_PRIVATE_SKIP_SIZE_LIMIT=1
             
-            # Remove existing symlinks if they exist
-            rm -f "$usrBinDir/node" "$usrBinDir/npm" "$usrBinDir/npx" "$usrBinDir/git" "$usrBinDir/git-remote-http" "$usrBinDir/git-remote-https"
-            
-            # Shell wrappers
-            cat << 'WRAPPER' > "$usrBinDir/node"
-            #!/system/bin/sh
-            # Detect dynamic active version of Node.js
-            ACTIVE_NODE_VER=""
-            if [ -f "${'$'}APP_FILES_DIR/active_node_version" ]; then
-                ACTIVE_NODE_VER=$(cat "${'$'}APP_FILES_DIR/active_node_version")
-            fi
-            
-            if [ -n "${'$'}ACTIVE_NODE_VER" ] && [ -f "${'$'}APP_FILES_DIR/versions/node/${'$'}ACTIVE_NODE_VER/bin/node" ]; then
-                # Run active version! Determine system linker dynamically
-                LINKER="/system/bin/linker"
-                if [ -f "/system/bin/linker64" ]; then
-                    LINKER="/system/bin/linker64"
-                fi
-                export LD_LIBRARY_PATH="${'$'}APP_FILES_DIR/versions/node/${'$'}ACTIVE_NODE_VER/lib:$nativeLibPath:$libLinksDir"
-                exec "${'$'}LINKER" "${'$'}APP_FILES_DIR/versions/node/${'$'}ACTIVE_NODE_VER/bin/node" "${'$'}@"
-            else
-                # Fallback to default
-                export LD_LIBRARY_PATH="$nativeLibPath:$libLinksDir"
-                exec "$nativeLibPath/libnode_bin.so" "${'$'}@"
-            fi
-            WRAPPER
-            chmod 755 "$usrBinDir/node"
-
-            # NPM wrapper
-            cat << 'WRAPPER' > "$usrBinDir/npm"
-            #!/system/bin/sh
-            ACTIVE_NODE_VER=""
-            if [ -f "${'$'}APP_FILES_DIR/active_node_version" ]; then
-                ACTIVE_NODE_VER=$(cat "${'$'}APP_FILES_DIR/active_node_version")
-            fi
-            if [ -n "${'$'}ACTIVE_NODE_VER" ] && [ -f "${'$'}APP_FILES_DIR/versions/node/${'$'}ACTIVE_NODE_VER/lib/node_modules/npm/bin/npm-cli.js" ]; then
-                exec "$usrBinDir/node" "${'$'}APP_FILES_DIR/versions/node/${'$'}ACTIVE_NODE_VER/lib/node_modules/npm/bin/npm-cli.js" "${'$'}@"
-            else
-                # Fallback npm script path if any default exists
-                if [ -f "${'$'}APP_FILES_DIR/npm_pkg/bin/npm-cli.js" ]; then
-                    exec "$usrBinDir/node" "${'$'}APP_FILES_DIR/npm_pkg/bin/npm-cli.js" "${'$'}@"
-                else
-                    echo "No active Node.js version set or NPM not found."
-                    exit 1
-                fi
-            fi
-            WRAPPER
-            chmod 755 "$usrBinDir/npm"
-
-            # NPX wrapper
-            cat << 'WRAPPER' > "$usrBinDir/npx"
-            #!/system/bin/sh
-            ACTIVE_NODE_VER=""
-            if [ -f "${'$'}APP_FILES_DIR/active_node_version" ]; then
-                ACTIVE_NODE_VER=$(cat "${'$'}APP_FILES_DIR/active_node_version")
-            fi
-            if [ -n "${'$'}ACTIVE_NODE_VER" ] && [ -f "${'$'}APP_FILES_DIR/versions/node/${'$'}ACTIVE_NODE_VER/lib/node_modules/npm/bin/npx-cli.js" ]; then
-                exec "$usrBinDir/node" "${'$'}APP_FILES_DIR/versions/node/${'$'}ACTIVE_NODE_VER/lib/node_modules/npm/bin/npx-cli.js" "${'$'}@"
-            else
-                echo "No active Node.js version set or NPX not found."
-                exit 1
-            fi
-            WRAPPER
-            chmod 755 "$usrBinDir/npx"
-
-            cat << 'WRAPPER' > "$usrBinDir/git"
-            #!/system/bin/sh
-            export LD_LIBRARY_PATH="$nativeLibPath:$libLinksDir"
-            exec "$nativeLibPath/libgit_bin.so" "${'$'}@"
-            WRAPPER
-            chmod 755 "$usrBinDir/git"
-
-            cat << 'WRAPPER' > "$usrBinDir/git-remote-http"
-            #!/system/bin/sh
-            export LD_LIBRARY_PATH="$nativeLibPath:$libLinksDir"
-            exec "$nativeLibPath/libgit_remote_http_bin.so" "${'$'}@"
-            WRAPPER
-            chmod 755 "$usrBinDir/git-remote-http"
-
-            cat << 'WRAPPER' > "$usrBinDir/git-remote-https"
-            #!/system/bin/sh
-            export LD_LIBRARY_PATH="$nativeLibPath:$libLinksDir"
-            exec "$nativeLibPath/libgit_remote_http_bin.so" "${'$'}@"
-            WRAPPER
-            chmod 755 "$usrBinDir/git-remote-https"
+            # Note: Node, NPM, NPX, Git, and Git-Remote-HTTP(S) wrappers are now generated
+            # natively via WrapperManager.kt. We do not generate them in init.sh anymore.
             
             cat << 'WRAPPER' > "$usrBinDir/gh"
             #!/system/bin/sh
@@ -745,6 +671,13 @@ class PtyBridge {
             export LD_LIBRARY_PATH="$nativeLibPath:$libLinksDir"
             export SHELL="$usrBinDir/sh"
             export NPM_CONFIG_SHELL="$usrBinDir/sh"
+
+            # Python Environment Integration
+            if [ -f "$filesDir/active_python_version" ]; then
+                export PYTHON_ACTIVE_VERSION=${'$'}(cat "$filesDir/active_python_version")
+                export PYTHONHOME="$filesDir/versions/python/${'$'}PYTHON_ACTIVE_VERSION"
+                export LD_LIBRARY_PATH="${'$'}PYTHONHOME/lib:${'$'}LD_LIBRARY_PATH"
+            fi
             
             cat << 'EOF' > "$usrBinDir/git-credential-kodrix"
             #!/system/bin/sh
@@ -762,8 +695,8 @@ class PtyBridge {
             git config --global url."https://".insteadOf "ssh://"
             git config --global core.autocrlf false
             git config --global core.attributesFile "$usrEtcDir/gitattributes"
-            # Disable external credential helper - use .netrc via libcurl instead (avoids Android W^X exec restrictions)
-            git config --global credential.helper ""
+            # Use dynamic credential helper via shell to bypass Android W^X restrictions securely
+            git config --global credential.helper "!sh $usrBinDir/git-credential-kodrix"
             touch "$usrEtcDir/gitattributes"
             [ -z "$(git config --global user.name)" ] && git config --global user.name "Kodrix Developer"
             [ -z "$(git config --global user.email)" ] && git config --global user.email "developer@kodrix.local"
@@ -773,19 +706,12 @@ class PtyBridge {
                 cat /system/etc/security/cacerts/*.0 >> "$usrEtcDir/cacert.pem" 2>/dev/null || true
             fi
 
-            # Write GUI credentials if logged in via the Kodrix GUI
-            if [ -n "${'$'}KODRIX_GH_TOKEN" ]; then
-                # .netrc: read by libcurl internally - no exec needed, bypasses W^X entirely
-                printf 'machine github.com\nlogin %s\npassword %s\n' "${'$'}{KODRIX_GH_USER:-kodrix}" "${'$'}KODRIX_GH_TOKEN" > "${'$'}HOME/.netrc"
-                chmod 600 "${'$'}HOME/.netrc"
-                # Write gh CLI config directly - bypasses TLS verification during auth
-                mkdir -p "${'$'}HOME/.config/gh"
-                printf 'github.com:\n    oauth_token: %s\n    user: %s\n    git_protocol: https\n' "${'$'}KODRIX_GH_TOKEN" "${'$'}{KODRIX_GH_USER:-kodrix}" > "${'$'}HOME/.config/gh/hosts.yml"
-            fi
-            
+            # Note: We no longer write credentials to .netrc or hosts.yml for security reasons.
+            # The GitHub token is passed via environment variables (KODRIX_GH_TOKEN) 
+            # and handled dynamically by the git-credential-kodrix helper in-memory.
+
             _npm_fix() {
                 if [ -d "node_modules" ]; then
-                    echo "Applying Android Native Fixes v12..."
                     
                     # 1. Fix permissions for all executables
                     find node_modules -type f -name "*" -executable -exec chmod 555 {} + 2>/dev/null || true
@@ -870,15 +796,86 @@ class PtyBridge {
             npm() {
                 case "${'$'}1" in
                     install|i|ci|update|up)
-                        node "$filesDir/npm_pkg/bin/npm-cli.js" "${'$'}@"
+                        # Check if installing/updating npm itself globally
+                        is_global=0
+                        is_npm_pkg=0
+                        for arg in "${'$'}@"; do
+                            if [ "${'$'}arg" = "-g" ] || [ "${'$'}arg" = "--global" ]; then
+                                is_global=1
+                            fi
+                            case "${'$'}arg" in
+                                npm|npm@*)
+                                    is_npm_pkg=1
+                                    ;;
+                            esac
+                        done
+
+                        is_global_npm=0
+                        if [ "${'$'}is_global" -eq 1 ] && [ "${'$'}is_npm_pkg" -eq 1 ]; then
+                            is_global_npm=1
+                        fi
+
+                        if [ "${'$'}is_global_npm" -eq 1 ]; then
+                            # Remove the wrappers temporarily so npm can write its symlinks/files without EEXIST
+                            rm -f "$usrBinDir/npm" "$usrBinDir/npx"
+                        fi
+
+                        # Determine which npm script to run
+                        ACTIVE_NODE_VER=""
+                        if [ -f "${'$'}APP_FILES_DIR/active_node_version" ]; then
+                            ACTIVE_NODE_VER=$(cat "${'$'}APP_FILES_DIR/active_node_version")
+                        fi
+                        
+                        if [ -n "${'$'}ACTIVE_NODE_VER" ] && [ -f "${'$'}APP_FILES_DIR/versions/node/${'$'}ACTIVE_NODE_VER/lib/node_modules/npm/bin/npm-cli.js" ]; then
+                            "$usrBinDir/node" "${'$'}APP_FILES_DIR/versions/node/${'$'}ACTIVE_NODE_VER/lib/node_modules/npm/bin/npm-cli.js" "${'$'}@"
+                        elif [ -f "$usrDir/lib/node_modules/npm/bin/npm-cli.js" ]; then
+                            "$usrBinDir/node" "$usrDir/lib/node_modules/npm/bin/npm-cli.js" "${'$'}@"
+                        else
+                            "$usrBinDir/node" "${'$'}APP_FILES_DIR/npm_pkg/bin/npm-cli.js" "${'$'}@"
+                        fi
+                        ret=$?
+
+                        if [ "${'$'}is_global_npm" -eq 1 ]; then
+                            # Recreate the wrappers!
+                            _recreate_wrappers
+                        fi
+
                         _npm_fix
+                        return ${'$'}ret
                         ;;
                     *)
-                        node "$filesDir/npm_pkg/bin/npm-cli.js" "${'$'}@"
+                        # Determine which npm script to run
+                        ACTIVE_NODE_VER=""
+                        if [ -f "${'$'}APP_FILES_DIR/active_node_version" ]; then
+                            ACTIVE_NODE_VER=$(cat "${'$'}APP_FILES_DIR/active_node_version")
+                        fi
+                        
+                        if [ -n "${'$'}ACTIVE_NODE_VER" ] && [ -f "${'$'}APP_FILES_DIR/versions/node/${'$'}ACTIVE_NODE_VER/lib/node_modules/npm/bin/npm-cli.js" ]; then
+                            "$usrBinDir/node" "${'$'}APP_FILES_DIR/versions/node/${'$'}ACTIVE_NODE_VER/lib/node_modules/npm/bin/npm-cli.js" "${'$'}@"
+                        elif [ -f "$usrDir/lib/node_modules/npm/bin/npm-cli.js" ]; then
+                            "$usrBinDir/node" "$usrDir/lib/node_modules/npm/bin/npm-cli.js" "${'$'}@"
+                        else
+                            "$usrBinDir/node" "${'$'}APP_FILES_DIR/npm_pkg/bin/npm-cli.js" "${'$'}@"
+                        fi
                         ;;
                 esac
             }
-            npx() { node "$filesDir/npm_pkg/bin/npx-cli.js" "${'$'}@"; _npm_fix; }
+
+            npx() {
+                ACTIVE_NODE_VER=""
+                if [ -f "${'$'}APP_FILES_DIR/active_node_version" ]; then
+                    ACTIVE_NODE_VER=$(cat "${'$'}APP_FILES_DIR/active_node_version")
+                fi
+                
+                if [ -n "${'$'}ACTIVE_NODE_VER" ] && [ -f "${'$'}APP_FILES_DIR/versions/node/${'$'}ACTIVE_NODE_VER/lib/node_modules/npm/bin/npx-cli.js" ]; then
+                    "$usrBinDir/node" "${'$'}APP_FILES_DIR/versions/node/${'$'}ACTIVE_NODE_VER/lib/node_modules/npm/bin/npx-cli.js" "${'$'}@"
+                elif [ -f "$usrDir/lib/node_modules/npm/bin/npx-cli.js" ]; then
+                    "$usrBinDir/node" "$usrDir/lib/node_modules/npm/bin/npx-cli.js" "${'$'}@"
+                else
+                    "$usrBinDir/node" "${'$'}APP_FILES_DIR/npm_pkg/bin/npx-cli.js" "${'$'}@"
+                fi
+                _npm_fix
+            }
             
             node() { "$usrBinDir/node" "${'$'}@"; }
             git() { "$usrBinDir/git" "${'$'}@"; }

@@ -1,7 +1,7 @@
 {
-  "node_version": "v18.17.1",
-  "node_url": "https://github.com/Zohaib8090/KodrixIDE/releases/download/v1.0/node_arm64.zip",
+  "node_version": "v22.0.0",
+  "node_url": "https://raw.githubusercontent.com/Zohaib8090/KodrixMarketplace/main/binaries/node-arm64.zip",
   "git_version": "v2.41.0",
-  "git_url": "https://github.com/Zohaib8090/KodrixIDE/releases/download/v1.0/git_arm64.zip",
-  "notes": "Initial binary update system check."
+  "git_url": "https://raw.githubusercontent.com/Zohaib8090/KodrixMarketplace/main/binaries/git-arm64.zip",
+  "notes": "Updated binary registry — now hosted on KodrixMarketplace."
 }

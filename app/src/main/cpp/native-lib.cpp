@@ -25,8 +25,9 @@ static int cred_acquire_cb(git_credential **out,
 }
 
 static int cert_check_cb(git_cert *cert, int valid, const char *host, void *payload) {
-    // 0 means unconditionally allow the connection, bypassing SSL validation errors.
-    return 0;
+    // 0 means success. We only return 0 if libgit2 (or the backend) marked the cert as valid.
+    // Returning -1 rejects the certificate and prevents MITM attacks.
+    return valid ? 0 : -1;
 }
 
 extern "C" JNIEXPORT jstring JNICALL

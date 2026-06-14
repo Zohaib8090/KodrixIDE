@@ -58,16 +58,20 @@ All registry files are fetched dynamically by the app via `raw.githubusercontent
 
 ### 2. `binaries.json`
 * **Path**: `Zohaib8090/KodrixMarketplace/main/binaries.json`
-* **Purpose**: Used by the app to check for compiler updates.
+* **Purpose**: Used by the app to check for compiler/runtime updates via `BinaryUpdater.kt`.
+* **Key format**: `snake_case` (matches what `BinaryUpdater.kt` parses via `json.getString("node_version")` etc.)
 * **Schema**:
 ```json
 {
-  "nodeVersion": "18.16.0",
-  "nodeUrl": "https://github.com/Zohaib8090/KodrixMarketplace/releases/download/node-v18.16.0/node-v18.16.0-android-universal.zip",
-  "gitVersion": "2.40.0",
-  "gitUrl": "https://github.com/Zohaib8090/KodrixMarketplace/releases/download/git-v2.40.0/git-v2.40.0-android.zip"
+  "node_version": "v22.0.0",
+  "node_url": "https://raw.githubusercontent.com/Zohaib8090/KodrixMarketplace/main/binaries/node-arm64.zip",
+  "git_version": "v2.41.0",
+  "git_url": "https://raw.githubusercontent.com/Zohaib8090/KodrixMarketplace/main/binaries/git-arm64.zip",
+  "notes": "Optional release notes shown to the user."
 }
 ```
+
+> ⚠️ **Do NOT use camelCase keys** (`nodeVersion`, `gitVersion`). The JSON parser in `BinaryUpdater.kt` uses `node_version` / `git_version` / `node_url` / `git_url`.
 
 ### 3. `marketplace/` Folder
 * **Path**: `Zohaib8090/KodrixMarketplace/main/marketplace/`
@@ -132,6 +136,29 @@ Fetches the `binaries.json` file to check for newer releases of Node.js and Git:
 ```kotlin
 val registryUrl = "https://raw.githubusercontent.com/Zohaib8090/KodrixMarketplace/main/binaries.json"
 ```
+
+### D. VersionChecker (`VersionChecker.kt`)
+
+A singleton that verifies which binary is **actually running on disk** by executing `binary --version`. It is never polled — it only runs on two triggers:
+
+1. **After a download completes** — to confirm the extracted binary works
+2. **When the user activates a version** (taps "Use") — to confirm the switch
+
+Results are emitted to a `StateFlow<Map<String, VerifiedVersion>>` and shown in the Marketplace UI as chips:
+- `✓ v22.0.0` (green) — binary ran successfully
+- `⚠ Verification failed` (amber) — binary missing, not executable, or crashed
+
+**Crash-recovery flow:**
+```
+downloadVersion()
+  ├─ writes download.tmp marker to the version folder
+  ├─ downloads + extracts the zip
+  └─ on success: deletes download.tmp, calls VersionChecker.check()
+       on crash:  marker stays, cleaned up by BinaryManager.cleanUpStaleDownloads() on next launch
+```
+
+**Backup system:**
+Old versions are **never deleted**. Switching to a new version leaves the old one on disk in `versions/<tool>/<ver>/`. The user can revert instantly by tapping "Use" on the old version card in the Marketplace → Node.js tab.
 
 ---
 

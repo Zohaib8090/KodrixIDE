@@ -156,13 +156,23 @@ fun BrowserView(viewModel: TerminalViewModel) {
                         displayZoomControls = false
                         useWideViewPort = true
                         loadWithOverviewMode = true
-                        mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
+                        mixedContentMode = WebSettings.MIXED_CONTENT_NEVER_ALLOW
                     }
                     
-                    // Enable Remote Debugging via PC Chrome
-                    WebView.setWebContentsDebuggingEnabled(true)
+                    // Enable Remote Debugging via PC Chrome only in debug builds
+                    val isDebuggable = (context.applicationInfo.flags and android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE) != 0
+                    WebView.setWebContentsDebuggingEnabled(isDebuggable)
 
                     webViewClient = object : WebViewClient() {
+                        override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean {
+                            val nextUrl = request?.url?.toString() ?: return false
+                            if (nextUrl.startsWith("file://") || nextUrl.startsWith("javascript:") || nextUrl.startsWith("intent://")) {
+                                viewModel.appendLogcat("BROWSER [SECURITY]: Blocked unsafe URL scheme: ${request.url.scheme}")
+                                return true
+                            }
+                            return false
+                        }
+
                         override fun onPageFinished(view: WebView?, urlStr: String?) {
                             urlStr?.let { url = it }
                             // Inject Eruda DevTools
@@ -230,14 +240,27 @@ fun BrowserView(viewModel: TerminalViewModel) {
                         }
                     }
 
-                    // Console Bridge
+                    // Console Bridge - Scoped to trusted origins
                     addJavascriptInterface(object {
+                        private fun isAllowedOrigin(): Boolean {
+                            val currentUrl = webView?.url ?: return false
+                            return currentUrl.startsWith("http://localhost") || 
+                                   currentUrl.startsWith("http://127.0.0.1") ||
+                                   currentUrl.startsWith("file:///android_asset/")
+                        }
+
                         @JavascriptInterface
-                        fun log(msg: String) { viewModel.appendLogcat("BROWSER [LOG]: $msg") }
+                        fun log(msg: String) { 
+                            if (isAllowedOrigin()) viewModel.appendLogcat("BROWSER [LOG]: $msg") 
+                        }
                         @JavascriptInterface
-                        fun error(msg: String) { viewModel.appendLogcat("BROWSER [ERROR]: $msg") }
+                        fun error(msg: String) { 
+                            if (isAllowedOrigin()) viewModel.appendLogcat("BROWSER [ERROR]: $msg") 
+                        }
                         @JavascriptInterface
-                        fun warn(msg: String) { viewModel.appendLogcat("BROWSER [WARN]: $msg") }
+                        fun warn(msg: String) { 
+                            if (isAllowedOrigin()) viewModel.appendLogcat("BROWSER [WARN]: $msg") 
+                        }
                     }, "IDEBridge")
 
                     loadUrl(url)

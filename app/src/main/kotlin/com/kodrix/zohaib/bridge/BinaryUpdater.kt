@@ -23,6 +23,11 @@ object BinaryUpdater {
     )
 
     suspend fun checkUpdates(registryUrl: String): BinaryUpdateInfo? = withContext(Dispatchers.IO) {
+        if (!registryUrl.startsWith("https://github.com/") && !registryUrl.startsWith("https://raw.githubusercontent.com/")) {
+            Log.e(TAG, "Blocked update check from untrusted domain: $registryUrl")
+            return@withContext null
+        }
+
         var connection: HttpURLConnection? = null
         try {
             val url = URL(registryUrl)
@@ -58,6 +63,11 @@ object BinaryUpdater {
         targetDirName: String, // e.g. "binaries"
         onProgress: (Float, Long, Long) -> Unit // progress, downloaded, total
     ): Boolean = withContext(Dispatchers.IO) {
+        if (!urlStr.startsWith("https://github.com/") && !urlStr.startsWith("https://raw.githubusercontent.com/")) {
+            Log.e(TAG, "Blocked download from untrusted domain: $urlStr")
+            return@withContext false
+        }
+
         var connection: HttpURLConnection? = null
         try {
             val url = URL(urlStr)

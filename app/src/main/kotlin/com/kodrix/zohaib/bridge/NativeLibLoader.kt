@@ -26,18 +26,28 @@ object NativeLibLoader {
                 // Already copied for this version, skip expensive I/O
                 logFile.appendText("Libs already copied for $versionStamp, skipping\\n")
             } else {
-                // Copy all native libraries
+                // Clean up any old mismatched libraries from previous installations
+                File(libDir, "libcrypto.so").delete()
+                File(libDir, "libssl.so").delete()
+                File(libDir, "libz.so").delete()
+
                 val nativeLibDir = context.applicationInfo.nativeLibraryDir
-                logFile.appendText("Processing all libs in $nativeLibDir...\\n")
-                
-                File(nativeLibDir).listFiles { f -> f.name.endsWith(".so") && !f.name.endsWith("_bin.so") }?.forEach { srcFile ->
+                logFile.appendText("Processing all libs in $nativeLibDir...\n")
+
+                File(nativeLibDir).listFiles { f ->
+                    f.name.endsWith(".so") &&
+                    !f.name.endsWith("_bin.so") &&
+                    f.name != "libcrypto.so" &&
+                    f.name != "libssl.so" &&
+                    f.name != "libz.so"
+                }?.forEach { srcFile ->
                     val name = srcFile.name
                     // Restore original name for versioned libs (e.g. libz.so.1.so -> libz.so.1)
                     val actualName = if (name.contains(".so.") && name.endsWith(".so")) {
                         name.removeSuffix(".so")
                     } else name
                     
-                    logFile.appendText("Handling $name -> $actualName\\n")
+                    logFile.appendText("Handling $name -> $actualName\n")
                     val dstFile = File(libDir, actualName)
                     srcFile.inputStream().use { input ->
                         dstFile.outputStream().use { output ->

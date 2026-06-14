@@ -535,7 +535,7 @@ class TerminalViewModel(application: Application) : AndroidViewModel(application
 
         val ldPath = buildString {
             if (activeNodeLibDir != null) append("$activeNodeLibDir:")
-            append("$nativeLibPath:$libLinksDir")
+            append("$libLinksDir")
         }
         val pathEnv = buildString {
             if (activeNodeBinDir != null) append("$activeNodeBinDir:")
@@ -558,7 +558,7 @@ class TerminalViewModel(application: Application) : AndroidViewModel(application
         // ensures the sh shebang resolves 'node' from filesDir/bin/node.
         val lspBinPath = lspBin.absolutePath
         val cmd = "export PATH='$filesDir/bin:$nativeLibPath:/system/bin:/system/xbin'; " +
-                  "export LD_LIBRARY_PATH='$nativeLibPath:$libLinksDir'; " +
+                  "export LD_LIBRARY_PATH='$libLinksDir'; " +
                   "export OPENSSL_CONF=/dev/null; " +
                   "export NODE_OPTIONS='--require $dnsOverridePath'; " +
                   "exec '$nodeBin' '$lspBinPath' --stdio"
@@ -697,7 +697,7 @@ class TerminalViewModel(application: Application) : AndroidViewModel(application
             val cmd = listOf(
                 "/system/bin/sh", "-c",
                 "export PATH='$usrBinDir:${filesDir.absolutePath}/bin:$nativeLibPath:/system/bin:/system/xbin'; " +
-                "export LD_LIBRARY_PATH='$nativeLibPath:$libLinksDir'; " +
+                "export LD_LIBRARY_PATH='$libLinksDir'; " +
                 "export OPENSSL_CONF=/dev/null; " +
                 "export NODE_OPTIONS='--require $dnsOverridePath'; " +
                 "exec '$nodeBin' '$npmCli' install $packages --no-fund --no-audit"
@@ -1267,7 +1267,7 @@ class TerminalViewModel(application: Application) : AndroidViewModel(application
                 env["TMPDIR"] = java.io.File(filesDir, "tmp").apply { mkdirs() }.absolutePath
                 val ldPath = buildString {
                     if (activeNodeLibDir != null) append("$activeNodeLibDir:")
-                    append("$nativeLibPath:$libLinksDir")
+                    append("$libLinksDir")
                 }
                 val pathEnv = buildString {
                     if (activeNodeBinDir != null) append("$activeNodeBinDir:")
@@ -1727,7 +1727,7 @@ class TerminalViewModel(application: Application) : AndroidViewModel(application
         val dnsOverridePath = java.io.File(filesDir, "dns-override.js").absolutePath
         val ldPath = buildString {
             if (activeNodeLibDir != null) append("$activeNodeLibDir:")
-            append("$nativeLibPath:$libLinksDir")
+            append("$libLinksDir")
         }
         val pathEnv = buildString {
             if (activeNodeBinDir != null) append("$activeNodeBinDir:")
@@ -1961,12 +1961,12 @@ class TerminalViewModel(application: Application) : AndroidViewModel(application
             val logFile = java.io.File(filesDir, "tunnel.log")
             val env = arrayOf(
                 "HOME=$filesDir",
-                "LD_LIBRARY_PATH=$nativeLibPath"
+                "LD_LIBRARY_PATH=$filesDir/lib"
             )
             try {
                 logFile.writeText("--- Bore Tunnel Starting ---\n")
                 val process = Runtime.getRuntime().exec(
-                    arrayOf(boreBin, "local", port.toString(), "--to", "161.35.110.36"),
+                    arrayOf(boreBin, "local", port.toString(), "--to", "bore.pub"),
                     env
                 )
                 val newTunnel = ForwardedPort(port, "Starting...", process)
@@ -1978,8 +1978,8 @@ class TerminalViewModel(application: Application) : AndroidViewModel(application
                         val l = line ?: continue
                         Log.d("CodeOSS-Bore", l)
                         logFile.appendText("OUT: $l\n")
-                        if (l.contains("listening at 161.35.110.36:")) {
-                            val remotePort = l.substringAfter("listening at 161.35.110.36:").trim()
+                        if (l.contains("listening at ")) {
+                            val remotePort = l.substringAfter("listening at ").trim().substringAfter(":")
                             val url = "http://bore.pub:$remotePort"
                             _activeTunnels.value = _activeTunnels.value.map {
                                 if (it.port == port) it.copy(url = url) else it
@@ -2036,7 +2036,7 @@ class TerminalViewModel(application: Application) : AndroidViewModel(application
             "GIT_TEMPLATE_DIR=${getApplication<Application>().filesDir}/git_templates",
             "GIT_CONFIG_NOSYSTEM=1",
             "HOME=${getApplication<Application>().filesDir}",
-            "LD_LIBRARY_PATH=$nativeLibPath:$libLinksDir"
+            "LD_LIBRARY_PATH=$libLinksDir"
         )
         return try {
             Runtime.getRuntime().exec(arrayOf(gitBin) + args, env, projDir)
@@ -2649,7 +2649,7 @@ class TerminalViewModel(application: Application) : AndroidViewModel(application
                 val env = pb.environment()
                 val libLinksDir = java.io.File(context.filesDir, "lib").absolutePath
                 env["PATH"] = "$usrBinDir:/system/bin:/system/xbin"
-                env["LD_LIBRARY_PATH"] = "$nativeLibPath:$libLinksDir"
+                env["LD_LIBRARY_PATH"] = "$libLinksDir"
                 env["HOME"] = filesDir
                 env["GIT_TEMPLATE_DIR"] = "$filesDir/git_templates"
                 env["GIT_CONFIG_NOSYSTEM"] = "1"
@@ -2863,7 +2863,8 @@ class TerminalViewModel(application: Application) : AndroidViewModel(application
         com.kodrix.zohaib.bridge.PtyBridge().setupEnvironment(context)
 
         val binDir = context.filesDir.absolutePath
-        val libDir = context.applicationInfo.nativeLibraryDir
+        val nativeLibPath = context.applicationInfo.nativeLibraryDir
+        val libLinksDir = java.io.File(context.filesDir, "lib").absolutePath
 
         // Inject the active Node.js version's bin/ and lib/ dirs if available
         val activeNodeVersion = binaryManager.getActiveVersion("node")
@@ -2885,11 +2886,12 @@ class TerminalViewModel(application: Application) : AndroidViewModel(application
             "TERM=xterm-256color",
             "HOME=$cwd",
             "APP_FILES_DIR=$binDir",
-            "APP_LIB_DIR=$libDir",
-            "GIT_EXEC_PATH=$libDir",
+            "APP_LIB_DIR=$libLinksDir",
+            "GIT_EXEC_PATH=$nativeLibPath",
             "ENV=$envPath"
         )
-        if (activeNodeLibDir != null) envList.add("LD_LIBRARY_PATH=$activeNodeLibDir:$libDir")
+        if (activeNodeLibDir != null) envList.add("LD_LIBRARY_PATH=$activeNodeLibDir:$libLinksDir")
+        else envList.add("LD_LIBRARY_PATH=$libLinksDir")
         _githubUser.value?.let { envList.add("KODRIX_GH_USER=$it") }
         _githubToken.value?.let { envList.add("KODRIX_GH_TOKEN=$it") }
 
@@ -3097,6 +3099,53 @@ class TerminalViewModel(application: Application) : AndroidViewModel(application
         runTask("NPM Install", "npm install $packageName")
         _sidebarMode.value = SidebarMode.EXPLORER
         _isPanelVisible.value = true
+    }
+
+    // ── Python Onboarding Setup ───────────────────────────────────────────────
+    private val _showPythonOnboarding = MutableStateFlow(
+        prefs.getBoolean("first_time_python_prompt", true)
+    )
+    val showPythonOnboarding = _showPythonOnboarding.asStateFlow()
+
+    fun dismissPythonOnboarding() {
+        prefs.edit().putBoolean("first_time_python_prompt", false).apply()
+        _showPythonOnboarding.value = false
+    }
+
+    fun installPythonInBackground() {
+        viewModelScope.launch(Dispatchers.IO) {
+            val abi = android.os.Build.SUPPORTED_ABIS.firstOrNull() ?: "arm64-v8a"
+            val url = when (abi) {
+                "armeabi-v7a" -> "https://github.com/Zohaib8090/KodrixMarketplace/releases/download/v1.0/python-3.13.13-armeabi-v7a.zip"
+                "x86" -> "https://github.com/Zohaib8090/KodrixMarketplace/releases/download/v1.0/python-3.13.13-x86.zip"
+                "x86_64" -> "https://github.com/Zohaib8090/KodrixMarketplace/releases/download/v1.0/python-3.13.13-x86_64.zip"
+                else -> "https://github.com/Zohaib8090/KodrixMarketplace/releases/download/v1.0/python-3.13.13-arm64-v8a.zip"
+            }
+            
+            try {
+                // Download and extract
+                binaryManager.downloadVersion("python", "3.13.13", url)
+                // Set as active
+                binaryManager.setActiveVersion("python", "3.13.13")
+                
+                withContext(Dispatchers.Main) {
+                    android.widget.Toast.makeText(
+                        getApplication(),
+                        "✅ Python 3.13.13 installed & activated successfully!",
+                        android.widget.Toast.LENGTH_LONG
+                    ).show()
+                }
+            } catch (e: Exception) {
+                Log.e("TerminalViewModel", "Failed to install Python in background", e)
+                withContext(Dispatchers.Main) {
+                    android.widget.Toast.makeText(
+                        getApplication(),
+                        "❌ Background Python installation failed: ${e.message}",
+                        android.widget.Toast.LENGTH_LONG
+                    ).show()
+                }
+            }
+        }
     }
 
     override fun onCleared() {

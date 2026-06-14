@@ -173,7 +173,7 @@ object WrapperManager {
             """
             #!/system/bin/sh
             $envExports
-            export LD_LIBRARY_PATH="${cfg.installDir.absolutePath}/lib:${cfg.nativeLibPath}:${cfg.libLinksDir}"
+            export LD_LIBRARY_PATH="${cfg.installDir.absolutePath}/lib:${cfg.libLinksDir}"
             exec "$usrBinPath/$interpreter" "${target.absolutePath}" "${'$'}@"
             """.trimIndent()
         } else {
@@ -210,7 +210,7 @@ object WrapperManager {
         val content = if (fallback.exists()) {
             """
             #!/system/bin/sh
-            export LD_LIBRARY_PATH="$nativeLibPath:$libLinksDir"
+            export LD_LIBRARY_PATH="$libLinksDir"
             exec "$nativeLibPath/$fallbackSoName" "${'$'}@"
             """.trimIndent()
         } else {
@@ -261,7 +261,7 @@ object WrapperManager {
             dest    = File(safeBinDir, "node"),
             content = """
                 #!/system/bin/sh
-                export LD_LIBRARY_PATH="$nativeLibPath:$libLinksDir"
+                export LD_LIBRARY_PATH="$libLinksDir"
                 exec "$nativeLibPath/libnode_bin.so" "${'$'}@"
             """.trimIndent()
         )
@@ -271,7 +271,7 @@ object WrapperManager {
             dest    = File(safeBinDir, "npm"),
             content = """
                 #!/system/bin/sh
-                export LD_LIBRARY_PATH="$nativeLibPath:$libLinksDir"
+                export LD_LIBRARY_PATH="$libLinksDir"
                 exec "$nativeLibPath/libnode_bin.so" "$filesDir/npm_pkg/bin/npm-cli.js" "${'$'}@"
             """.trimIndent()
         )
@@ -281,7 +281,7 @@ object WrapperManager {
             dest    = File(safeBinDir, "npx"),
             content = """
                 #!/system/bin/sh
-                export LD_LIBRARY_PATH="$nativeLibPath:$libLinksDir"
+                export LD_LIBRARY_PATH="$libLinksDir"
                 exec "$nativeLibPath/libnode_bin.so" "$filesDir/npm_pkg/bin/npx-cli.js" "${'$'}@"
             """.trimIndent()
         )
@@ -291,7 +291,7 @@ object WrapperManager {
             dest    = File(safeBinDir, "git"),
             content = """
                 #!/system/bin/sh
-                export LD_LIBRARY_PATH="$nativeLibPath:$libLinksDir"
+                export LD_LIBRARY_PATH="$libLinksDir"
                 exec "$nativeLibPath/libgit_bin.so" "${'$'}@"
             """.trimIndent()
         )
@@ -299,7 +299,7 @@ object WrapperManager {
         // git-remote-http / https — bundled
         val gitRemoteContent = """
             #!/system/bin/sh
-            export LD_LIBRARY_PATH="$nativeLibPath:$libLinksDir"
+            export LD_LIBRARY_PATH="$libLinksDir"
             exec "$nativeLibPath/libgit_remote_http_bin.so" "${'$'}@"
         """.trimIndent()
         writeSafeScript(File(safeBinDir, "git-remote-http"),  gitRemoteContent)

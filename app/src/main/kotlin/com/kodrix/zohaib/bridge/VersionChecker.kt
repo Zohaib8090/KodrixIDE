@@ -72,7 +72,6 @@ object VersionChecker {
                     if (customLibDir.exists() && customLibDir.isDirectory) {
                         append(customLibDir.absolutePath).append(":")
                     }
-                    append(context.applicationInfo.nativeLibraryDir).append(":")
                     append(File(context.filesDir, "lib").absolutePath)
                 }
 

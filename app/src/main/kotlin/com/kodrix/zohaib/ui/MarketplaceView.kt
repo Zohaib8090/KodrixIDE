@@ -41,13 +41,6 @@ fun MarketplaceView(viewModel: TerminalViewModel) {
 
     var selectedTab by remember { mutableStateOf(MarketplaceTab.EXTENSIONS) }
     var searchQuery by remember { mutableStateOf("") }
-    val isBetaMode by viewModel.isBetaMode.collectAsState()
-
-    LaunchedEffect(isBetaMode) {
-        if (!isBetaMode) {
-            selectedTab = MarketplaceTab.EXTENSIONS
-        }
-    }
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -161,31 +154,30 @@ fun MarketplaceView(viewModel: TerminalViewModel) {
             Spacer(Modifier.height((8 * uiScale).dp))
 
             // ── Tab row ───────────────────────────────────────────────────────
-            if (isBetaMode) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape((6 * uiScale).dp))
-                        .background(Color(0xFF161B22))
-                        .padding((3 * uiScale).dp),
-                    horizontalArrangement = Arrangement.spacedBy((3 * uiScale).dp)
-                ) {
-                    MarketplaceTab.values().forEach { tab ->
-                        val selected = selectedTab == tab
-                        Box(
-                            modifier = Modifier
-                                .weight(1f)
-                                .clip(RoundedCornerShape((4 * uiScale).dp))
-                                .background(if (selected) Color(0xFF21262D) else Color.Transparent)
-                                .clickable { selectedTab = tab; searchQuery = "" }
-                                .padding(vertical = (5 * uiScale).dp),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Icon(
-                                    imageVector = when (tab) {
-                                        MarketplaceTab.EXTENSIONS -> Icons.Default.Extension
-                                        MarketplaceTab.RUNTIMES   -> Icons.Default.SettingsEthernet
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape((6 * uiScale).dp))
+                    .background(Color(0xFF161B22))
+                    .padding((3 * uiScale).dp),
+                horizontalArrangement = Arrangement.spacedBy((3 * uiScale).dp)
+            ) {
+                MarketplaceTab.values().forEach { tab ->
+                    val selected = selectedTab == tab
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .clip(RoundedCornerShape((4 * uiScale).dp))
+                            .background(if (selected) Color(0xFF21262D) else Color.Transparent)
+                            .clickable { selectedTab = tab; searchQuery = "" }
+                            .padding(vertical = (5 * uiScale).dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                imageVector = when (tab) {
+                                    MarketplaceTab.EXTENSIONS -> Icons.Default.Extension
+                                    MarketplaceTab.RUNTIMES   -> Icons.Default.SettingsEthernet
                                     },
                                     contentDescription = null,
                                     tint = if (selected) Color(0xFF58A6FF) else Color.Gray,
@@ -205,7 +197,6 @@ fun MarketplaceView(viewModel: TerminalViewModel) {
                         }
                     }
                 }
-            }
         }
 
         // ── Content ───────────────────────────────────────────────────────────

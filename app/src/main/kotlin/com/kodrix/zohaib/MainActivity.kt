@@ -13,6 +13,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.kodrix.zohaib.analytics.AnalyticsHelper
 import com.kodrix.zohaib.ui.IDEView
 import com.kodrix.zohaib.ui.SplashScreen
+import com.kodrix.zohaib.ui.PythonOnboardingScreen
 import com.kodrix.zohaib.viewmodel.TerminalViewModel
 
 class MainActivity : ComponentActivity() {
@@ -62,7 +63,15 @@ class MainActivity : ComponentActivity() {
                 }
 
                 if (isReady) {
-                    IDEView(viewModel)
+                    val showOnboarding by viewModel.showPythonOnboarding.collectAsState()
+                    if (showOnboarding) {
+                        PythonOnboardingScreen(
+                            viewModel = viewModel,
+                            onFinished = { viewModel.dismissPythonOnboarding() }
+                        )
+                    } else {
+                        IDEView(viewModel)
+                    }
                 } else {
                     SplashScreen(viewModel)
                 }

@@ -643,7 +643,7 @@ class PtyBridge {
             
             cat << 'WRAPPER' > "$usrBinDir/gh"
             #!/system/bin/sh
-            export LD_LIBRARY_PATH="$nativeLibPath:$libLinksDir"
+            export LD_LIBRARY_PATH="$libLinksDir"
             exec "$nativeLibPath/libgh_bin.so" "${'$'}@"
             WRAPPER
             chmod 755 "$usrBinDir/gh"
@@ -668,7 +668,7 @@ class PtyBridge {
             chmod 755 "$usrBinDir/sh"
 
             export PATH="$usrBinDir:${'$'}PATH"
-            export LD_LIBRARY_PATH="$nativeLibPath:$libLinksDir"
+            export LD_LIBRARY_PATH="$libLinksDir"
             export SHELL="$usrBinDir/sh"
             export NPM_CONFIG_SHELL="$usrBinDir/sh"
 

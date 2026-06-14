@@ -322,7 +322,7 @@ class AgentOrchestrator(
             val libPrefix = if (nodeLibPath != null) "$nodeLibPath:" else ""
 
             env["PATH"] = "$pathPrefix$filesDir/usr/bin:$filesDir/bin:/system/bin:/system/xbin"
-            env["LD_LIBRARY_PATH"] = "$libPrefix$nativeLibPath:$filesDir/lib"
+            env["LD_LIBRARY_PATH"] = "$libPrefix$filesDir/lib"
             env["HOME"] = filesDir
             env["USER"] = "kodrix"
             

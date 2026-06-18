@@ -1,7 +1,7 @@
 <div align="center">
 
 <img src="https://img.shields.io/badge/Platform-Android%2010%2B-3DDC84?style=for-the-badge&logo=android&logoColor=white"/>
-<img src="https://img.shields.io/badge/Architecture-arm64--v8a-FF6B35?style=for-the-badge"/>
+<img src="https://img.shields.io/badge/Architecture-Multi--Arch-FF6B35?style=for-the-badge"/>
 <img src="https://img.shields.io/badge/License-Source--Available-red?style=for-the-badge"/>
 <img src="https://img.shields.io/badge/Status-Alpha-orange?style=for-the-badge"/>
 <img src="https://img.shields.io/badge/Version-1.1.2-blue?style=for-the-badge"/>
@@ -28,7 +28,7 @@
 
 Kodrix is a **complete, professional development environment** that runs entirely on your Android phone. Unlike other mobile code editors, it doesn't require Termux, a remote server, or a PC. Everything runs natively on-device.
 
-Clone a repo, install npm packages, run a dev server, debug your app — all from your phone.
+Clone a repo, install npm packages, interpret Python scripts, compile low-level C files, invoke a native AI agent, run a dev server, debug your app — all from your phone.
 
 > This is not a toy editor. This is a full IDE.
 
@@ -41,18 +41,22 @@ Clone a repo, install npm packages, run a dev server, debug your app — all fro
 3. Open the downloaded APK and tap **Install**
 4. Open Kodrix and start coding
 
-> **Minimum requirements:** Android 10+ (API 29) · arm64-v8a device · ~500MB free storage · 4GB RAM recommended
+> **Minimum requirements:** Android 10+ (API 29) · Universal Architecture Support · ~500MB free storage · 4GB RAM recommended
 
 ---
 
 ## Features
 
-### Editor
+### Editor & Intelligence
 - **Multi-file Tabs** — Open multiple files simultaneously with unsaved change indicators
 - **Split Screen** — View and edit files side by side horizontally or vertically
-- **Syntax Highlighting** — Color highlighting for Kotlin, JavaScript, TypeScript, HTML, CSS, Markdown and more
+- **LSP Autocomplete** — Full Language Server Protocol integration providing intelligent code suggestions, diagnostics, and hover information natively
+- **Syntax Highlighting** — Native color token parsing for C, C++, Python, Kotlin, JavaScript, TypeScript, HTML, CSS, Markdown and more
 - **Smart Keyboard** — Extra keys row (ESC, TAB, arrows, CTRL) that sits above the soft keyboard
 - **Font & UI Scale** — Adjustable font size and global UI scale for accessibility
+
+### AI Agent Loop
+- **Native Gemini Integration** — Fully operational local AI agent loop powered by Gemini. Ask questions, refactor code, and generate components directly within your editor workspace.
 
 ### Terminal
 - **Real Terminal** — Full PTY-based terminal powered by the termux-terminal-emulator library
@@ -68,10 +72,10 @@ Clone a repo, install npm packages, run a dev server, debug your app — all fro
 - **Auto-Stash Switching** — Seamlessly switch branches with automatic stash/pop
 - **One-click Clone** — Browse your GitHub repos and clone with a single tap
 
-### Runtime
-- **Node.js v25** — Full Node.js running on-device as native ARM64 binary
-- **npm Support** — Install packages and run scripts natively
-- **Auto Binary Updates** — Node.js and Git binaries update automatically via GitHub releases
+### Runtimes & Toolchains
+- **Node.js v25** — Full Node.js running on-device as native binary with full **npm** support
+- **Python 3** — Fully standalone, isolated local Python execution layer built right into the app
+- **Auto Binary Updates** — Runtimes and Git binaries update automatically via GitHub releases
 
 ### Browser & DevTools
 - **Built-in Browser** — Open your dev server directly inside the IDE
@@ -89,9 +93,9 @@ Clone a repo, install npm packages, run a dev server, debug your app — all fro
 ### Debugging
 - **Debug Console** — Variables, Watch, Call Stack, Breakpoints panel
 - **Live Logcat** — Real-time system log viewer with filtering and color coding
-- **Problems Panel** — Automatically parses build errors with file and line info
+- **Problems Panel** — Automatically parses interpreter/build errors with file and line info
 - **Output Panel** — Dedicated output view for running tasks
-- **Run & Debug** — Execute npm run dev directly from the debug panel
+- **Run & Debug** — Execute execution tasks directly from the debug panel
 
 ### Marketplace & Extensions
 - **Extension Marketplace** — Browse and search VS Code extensions via Open VSX
@@ -112,21 +116,21 @@ Clone a repo, install npm packages, run a dev server, debug your app — all fro
 
 ---
 
-## Supported Frameworks
+## Supported Frameworks & Languages
 
-| Framework | Status | Notes |
+| Target | Status | Notes |
 |-----------|--------|-------|
+| Python 3 | ✅ Working | Full runtime environment support |
 | React + Vite | ✅ Working | Use `@vitejs/plugin-react` (not swc variant) |
 | Express / Node.js | ✅ Working | Full support |
 | Vue + Vite | ✅ Working | Pure JS build |
 | Svelte + Vite | ✅ Working | Pure JS build |
 | Next.js | ✅ Working | Webpack mode, no Turbopack |
+| C / C++ | 🛠️ In Progress | Native standalone toolchain mapping |
 
 ---
 
 ## Architecture
-
-```
 Kodrix
 ├── Kotlin / Jetpack Compose (UI layer)
 ├── JNI Bridge (native-lib.cpp)
@@ -135,16 +139,19 @@ Kodrix
 │   └── DNS Override (Google DNS for Node.js)
 ├── Terminal Engine (termux-terminal-emulator)
 │   └── Full VT100/xterm emulation
-├── Bundled Binaries (jniLibs/arm64-v8a)
+├── Intelligence & AI Layer
+│   ├── Native LSP Engine (Language Server Client configs)
+│   └── Multi-Agent Loop Core (Gemini SDK runtime integration)
+├── Bundled Binaries & Toolchains (jniLibs/)
+│   ├── Multi-Architecture Native Support (arm64-v8a, armeabi-v7a, x86, x86_64)
 │   ├── libnode.so (Node.js v25 runtime)
+│   ├── python3 (Native Python interpreter execution binary)
 │   ├── libgit2.so (Git operations)
 │   ├── libnext_swc.so (SWC compiler for Next.js)
 │   ├── libcurl.so (HTTP/HTTPS)
 │   ├── libssl.so / libcrypto.so (OpenSSL 3.x)
 │   └── libicui18n/uc/data.so (Unicode support)
 └── Zero-Termux Policy (no external dependencies)
-```
-
 ---
 
 ## Building from Source
@@ -159,93 +166,99 @@ Kodrix
 - Rust (for SWC binary compilation)
 
 ```bash
-git clone https://github.com/Zohaib8090/KodrixIDE.git
+git clone [https://github.com/Zohaib8090/KodrixIDE.git](https://github.com/Zohaib8090/KodrixIDE.git)
 cd KodrixIDE
 ./gradlew assembleDebug
-```
-
-APK output: `app/build/outputs/apk/debug/app-debug.apk`
-
----
-
+APK output: app/build/outputs/apk/debug/app-debug.apk
+___
 ## Roadmap
+[x] Terminal with PTY
 
-- [x] Terminal with PTY
-- [x] Git clone over HTTPS
-- [x] GitHub OAuth login
-- [x] npm install
-- [x] React + Vite support
-- [x] Next.js support
-- [x] Built-in browser with DevTools
-- [x] Port forwarding (bore.pub)
-- [x] Multi-file tabs + split screen
-- [x] Source control UI
-- [x] Debug console + Logcat
-- [x] Extension marketplace UI
-- [x] Auto update notifications
-- [x] Node/Git binary auto-update system
-- [x] Termux terminal emulator integration
-- [x] Syntax highlighting
-- [x] Smart keyboard row
-- [x] Run & Debug panel
-- [ ] LSP autocomplete (language packs)
-- [ ] AI agent system (Gemini + Claude)
-- [ ] React Native support
-- [ ] Flutter support
-- [ ] Play Store release
+[x] Git clone over HTTPS
 
----
+[x] GitHub OAuth login
 
-## Known Limitations
+[x] npm install
 
-| Limitation | Reason | Planned Fix |
-|------------|--------|-------------|
-| x86 devices not supported | All binaries are arm64-v8a | Not planned |
-| No iOS support | Platform limitation | Not planned |
-| Turbopack not supported | Needs native SWC recompile | In progress |
-| x86 emulators not supported | ARM64 only | Not planned |
+[x] React + Vite support
 
----
+[x] Next.js support
 
-## Found a Bug?
+[x] Built-in browser with DevTools
 
-[Open an issue](https://github.com/Zohaib8090/KodrixIDE/issues) on GitHub with steps to reproduce.
+[x] Port forwarding (bore.pub)
 
----
+[x] Multi-file tabs + split screen
 
-## ⚖️ License
+[x] Source control UI
 
-Kodrix is source-available under the [KodrixIDE Source-Available License v1.0](LICENSE).
+[x] Debug console + Logcat
 
-| Use Case | Allowed |
-|----------|---------|
-| 🧑‍💻 Personal use & learning | ✅ Free |
-| 🎓 Education & bootcamps | ✅ Free |
-| 🏗️ Private non-commercial projects | ✅ Free |
-| 💰 Commercial / revenue-generating use | 💳 Paid license required |
-| 🔁 Redistribution or cloning | ❌ Not allowed |
-| 🏭 Building a competing IDE | ❌ Not allowed |
+[x] Extension marketplace UI
 
-For commercial licensing: contact [@ZohaibBaig144](https://x.com/ZohaibBaig144) on X.
+[x] Auto update notifications
 
----
+[x] Node/Git binary auto-update system
 
-## Acknowledgements
+[x] Termux terminal emulator integration
 
-- [libgit2](https://libgit2.org/) — Git operations
-- [Termux](https://termux.dev/) — Terminal emulator library
-- [Node.js](https://nodejs.org/) — JavaScript runtime
-- [bore](https://github.com/ekzhang/bore) — Port forwarding
-- [Open VSX](https://open-vsx.org/) — Extension marketplace
+[x] Syntax highlighting
 
----
+[x] Smart keyboard row
 
-<div align="center">
+[x] Run & Debug panel
+
+[x] Native Python 3 execution runtime
+
+[x] Multi-Architecture binary build profiles
+
+[x] LSP autocomplete implementation (language packs framework)
+
+[x] Integrated AI Agent loop (Gemini interface layer)
+
+[ ] Native C/C++ cross-compiler toolchain integration (Clang/GCC)
+
+[ ] React Native support
+
+[ ] Flutter support
+
+Known Limitations
+
+
+Limitation                  Reason                      Planned Fix
+No iOS support              Platform limitation         Not planned
+Turbopack not supported     Needs native SWC recompile  In progress
+
+Found a Bug?
+Open an issue on GitHub with steps to reproduce.
+
+Use Case,Allowed
+🧑‍💻 Personal use & learning,✅ Free
+🎓 Education & bootcamps,✅ Free
+🏗️ Private non-commercial projects,✅ Free
+💰 Commercial / revenue-generating use,💳 Paid license required
+🔁 Redistribution or cloning,❌ Not allowed
+🏭 Building a competing IDE,❌ Not allowed
+
+For commercial licensing: contact @ZohaibBaig144 on X.
+
+Acknowledgements
+libgit2 — Git operations
+
+Termux — Terminal emulator library
+
+Node.js — JavaScript runtime
+
+Python — Python interpreter backend
+
+Google Gemini — AI Agent infrastructure
+
+bore — Port forwarding
+
+Open VSX — Extension marketplace
 
 Made with ❤️ by a 17-year-old developer from Karachi, Pakistan
 
-*If Kodrix helps you, consider [sponsoring](https://github.com/sponsors/Zohaib8090)*
+If Kodrix helps you, consider sponsoring
 
 ⭐ Star this repo if you find it useful!
-
-</div>

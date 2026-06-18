@@ -124,12 +124,6 @@ object WrapperManager {
 
     // ── Private helpers ───────────────────────────────────────────────────────
 
-    /**
-     * Creates an OS-level symlink [dest] → [target].
-     *
-     * If [target] doesn't exist yet (tool not yet downloaded), falls back to writing
-     * a minimal "not installed" error script so the command still responds gracefully.
-     */
     private fun writeSymlink(target: File, dest: File, cfg: ToolWrapperConfig) {
         try {
             if (dest.exists() || isSymlink(dest)) {
@@ -138,14 +132,29 @@ object WrapperManager {
 
             if (target.exists()) {
                 target.setExecutable(true)
-                Os.symlink(target.absolutePath, dest.absolutePath)
-                Log.d(TAG, "  symlink ${dest.name} → ${target.absolutePath}")
+                // Write a shell wrapper script instead of a symlink to configure the library path correctly
+                val targetLibDir = File(target.parentFile?.parentFile, "lib")
+                val ldPath = if (targetLibDir.exists() && targetLibDir.isDirectory) {
+                    "${targetLibDir.absolutePath}:${cfg.libLinksDir}"
+                } else {
+                    cfg.libLinksDir
+                }
+
+                val scriptContent = """
+                    #!/system/bin/sh
+                    export LD_LIBRARY_PATH="$ldPath"
+                    exec "${target.absolutePath}" "${'$'}@"
+                """.trimIndent()
+
+                dest.writeText(scriptContent)
+                dest.setExecutable(true)
+                Log.d(TAG, "  symlink-wrapper ${dest.name} → ${target.absolutePath}")
             } else {
                 // Target binary not present — write a fallback shell that tries the native .so
                 writeNotInstalledScript(dest, cfg.toolName, cfg.nativeLibPath, cfg.fallbackSoName, cfg.libLinksDir)
             }
         } catch (e: Exception) {
-            Log.e(TAG, "  Failed symlink for ${dest.name}: ${e.message}")
+            Log.e(TAG, "  Failed wrapper for ${dest.name}: ${e.message}")
         }
     }
 

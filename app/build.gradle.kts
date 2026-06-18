@@ -14,7 +14,7 @@ android {
     defaultConfig {
         applicationId = "com.kodrix.zohaib"
         minSdk = 28
-        targetSdk = 28
+        targetSdk = 34
         versionCode = 4
         versionName = "1.1.1"
 

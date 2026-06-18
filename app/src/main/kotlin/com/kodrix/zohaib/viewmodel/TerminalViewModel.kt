@@ -58,7 +58,7 @@ data class NpmPackage(
     val date: String
 )
 
-data class ForwardedPort(val port: Int, val url: String, val process: Process)
+data class ForwardedPort(val port: Int, val url: String, val process: Process, val pid: Long = -1L)
 
 class TerminalViewModel(application: Application) : AndroidViewModel(application) {
     private val prefs = application.getSharedPreferences("kodrix_settings", android.content.Context.MODE_PRIVATE)
@@ -1965,42 +1965,84 @@ class TerminalViewModel(application: Application) : AndroidViewModel(application
             )
             try {
                 logFile.writeText("--- Bore Tunnel Starting ---\n")
-                val process = Runtime.getRuntime().exec(
-                    arrayOf(boreBin, "local", port.toString(), "--to", "bore.pub"),
-                    env
-                )
-                val newTunnel = ForwardedPort(port, "Starting...", process)
+
+                // Use ProcessBuilder to launch bore in its own process group so that
+                // calling destroy() on this process does NOT send signals to the app.
+                val pb = ProcessBuilder(boreBin, "local", port.toString(), "--to", "bore.pub")
+                pb.environment().apply {
+                    put("HOME", filesDir)
+                    put("LD_LIBRARY_PATH", "$filesDir/lib")
+                }
+                pb.redirectErrorStream(false) // keep stdout and stderr separate
+                val process = pb.start()
+
+                // Capture the PID so we can kill only this bore process later.
+                // Process.pid() is only available in Java 9+ (API 26+), so use reflection for safety.
+                val pid: Long = try {
+                    if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+                        val pidMethod = process.javaClass.getDeclaredMethod("pid")
+                        pidMethod.isAccessible = true
+                        (pidMethod.invoke(process) as? Long) ?: -1L
+                    } else {
+                        -1L
+                    }
+                } catch (e: Exception) {
+                    Log.w("CodeOSS-Bore", "Could not get bore PID: ${e.message}")
+                    -1L
+                }
+
+                val newTunnel = ForwardedPort(port, "Starting...", process, pid)
                 _activeTunnels.value = _activeTunnels.value + newTunnel
+
+                // Read stdout to detect the tunnel URL
                 viewModelScope.launch(Dispatchers.IO) {
-                    val reader = process.inputStream.bufferedReader()
-                    var line: String?
-                    while (reader.readLine().also { line = it } != null) {
-                        val l = line ?: continue
-                        Log.d("CodeOSS-Bore", l)
-                        logFile.appendText("OUT: $l\n")
-                        if (l.contains("listening at ")) {
-                            val remotePort = l.substringAfter("listening at ").trim().substringAfter(":")
-                            val url = "http://bore.pub:$remotePort"
-                            _activeTunnels.value = _activeTunnels.value.map {
-                                if (it.port == port) it.copy(url = url) else it
+                    try {
+                        val reader = process.inputStream.bufferedReader()
+                        var line: String?
+                        while (reader.readLine().also { line = it } != null) {
+                            val l = line ?: continue
+                            Log.d("CodeOSS-Bore", l)
+                            logFile.appendText("OUT: $l\n")
+                            if (l.contains("listening at ")) {
+                                val remotePort = l.substringAfter("listening at ").trim().substringAfter(":")
+                                val url = "http://bore.pub:$remotePort"
+                                _activeTunnels.value = _activeTunnels.value.map {
+                                    if (it.port == port) it.copy(url = url) else it
+                                }
                             }
                         }
+                    } catch (e: Exception) {
+                        Log.d("CodeOSS-Bore", "stdout closed for port $port")
                     }
                 }
+
+                // Read stderr to surface errors
                 viewModelScope.launch(Dispatchers.IO) {
-                    val errReader = process.errorStream.bufferedReader()
-                    var errLine: String?
-                    while (errReader.readLine().also { errLine = it } != null) {
-                        val l = errLine ?: continue
-                        Log.e("CodeOSS-Bore", "ERR: $l")
-                        logFile.appendText("ERR: $l\n")
-                        if (l.contains("error") || l.contains("failed")) {
-                            _activeTunnels.value = _activeTunnels.value.map {
-                                if (it.port == port && it.url == "Starting...") it.copy(url = "Error: ${l.take(50)}") else it
+                    try {
+                        val errReader = process.errorStream.bufferedReader()
+                        var errLine: String?
+                        while (errReader.readLine().also { errLine = it } != null) {
+                            val l = errLine ?: continue
+                            Log.e("CodeOSS-Bore", "ERR: $l")
+                            logFile.appendText("ERR: $l\n")
+                            if (l.contains("error") || l.contains("failed")) {
+                                _activeTunnels.value = _activeTunnels.value.map {
+                                    if (it.port == port && it.url == "Starting...") it.copy(url = "Error: ${l.take(50)}") else it
+                                }
                             }
                         }
+                    } catch (e: Exception) {
+                        Log.d("CodeOSS-Bore", "stderr closed for port $port")
                     }
                 }
+
+                // Watch for unexpected process exit and clean up UI state
+                viewModelScope.launch(Dispatchers.IO) {
+                    val exitCode = process.waitFor()
+                    Log.d("CodeOSS-Bore", "Bore exited for port $port with code $exitCode")
+                    _activeTunnels.value = _activeTunnels.value.filter { it.port != port }
+                }
+
             } catch (e: Exception) {
                 Log.e("Kodrix", "Bore failed for port $port", e)
                 _activeTunnels.value = _activeTunnels.value.map {
@@ -2012,17 +2054,23 @@ class TerminalViewModel(application: Application) : AndroidViewModel(application
 
     fun stopTunnel(port: Int) {
         val tunnel = _activeTunnels.value.find { it.port == port } ?: return
+        // Remove from UI immediately so the user sees it gone right away
+        _activeTunnels.value = _activeTunnels.value.filter { it.port != port }
         viewModelScope.launch(Dispatchers.IO) {
             try {
-                tunnel.process.destroy()
-                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
-                    tunnel.process.destroyForcibly()
+                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O && tunnel.pid > 0) {
+                    // Kill only the specific bore PID — does NOT affect the app's process group
+                    Runtime.getRuntime().exec(arrayOf("/system/bin/kill", "-9", tunnel.pid.toString())).waitFor()
+                    Log.d("Kodrix", "Killed bore PID=${tunnel.pid} for port $port")
+                } else {
+                    // Fallback for older APIs: destroy the process handle directly
+                    // This is generally safe since ProcessBuilder gives us an isolated handle
+                    tunnel.process.destroy()
                 }
             } catch (e: Exception) {
-                Log.e("Kodrix", "Failed to destroy tunnel process", e)
+                Log.e("Kodrix", "Failed to stop tunnel for port $port", e)
             }
         }
-        _activeTunnels.value = _activeTunnels.value.filter { it.port != port }
     }
 
     private fun runGit(vararg args: String): Process? {

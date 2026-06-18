@@ -489,9 +489,18 @@ class BinaryManager(private val context: Context) {
                 zipFile.delete()
             }
 
+            // Ensure correct read/write permissions for all extracted contents
+            toolDir.walkTopDown().forEach { file ->
+                file.setReadable(true, true)
+                file.setWritable(true, true)
+                if (file.isDirectory) {
+                    file.setExecutable(true, true)
+                }
+            }
+
             // Make all binaries in bin/ and libexec/ executable
-            File(toolDir, "bin").listFiles()?.forEach { it.setExecutable(true) }
-            File(toolDir, "libexec").walkTopDown().forEach { if (it.isFile) it.setExecutable(true) }
+            File(toolDir, "bin").listFiles()?.forEach { it.setExecutable(true, true) }
+            File(toolDir, "libexec").walkTopDown().forEach { if (it.isFile) it.setExecutable(true, true) }
 
             marker.delete()
             Log.i(TAG, "[$tool $version] Download & extraction complete")

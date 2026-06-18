@@ -5,7 +5,7 @@
 <img src="https://img.shields.io/badge/License-Source--Available-red?style=for-the-badge"/>
 <img src="https://img.shields.io/badge/Status-Alpha-orange?style=for-the-badge"/>
 <img src="https://img.shields.io/badge/Version-1.1.2-blue?style=for-the-badge"/>
-<img src="https://img.shields.io/github/stars/Zohaib8090/KodrixIDE?style=for-the-badge"/>
+<img src="https://img.shields.io/github/stars/Zohaib8090/KodrixIDE?style=for-the-badge&color=blue"/>
 
 <br/>
 <br/>

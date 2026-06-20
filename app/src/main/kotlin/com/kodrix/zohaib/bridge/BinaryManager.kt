@@ -204,12 +204,24 @@ class BinaryManager(private val context: Context) {
             WrapperManager.WrapperSpec("pip",     "script",  "bin/pip", "python"),
             WrapperManager.WrapperSpec("pip3",    "script",  "bin/pip3", "python")
         )
+        // clang-21 is the real binary; clang/clang++ are symlinks to it in Termux packages.
+        // clangd is the Language Server Protocol binary for C/C++.
+        "clang" -> listOf(
+            WrapperManager.WrapperSpec("clang",   "symlink", "bin/clang-21"),
+            WrapperManager.WrapperSpec("clang++", "symlink", "bin/clang-21"),
+            WrapperManager.WrapperSpec("clangd",  "symlink", "bin/clangd")
+        )
         else   -> listOf(WrapperManager.WrapperSpec(tool, "symlink", "bin/$tool"))
     }
 
     private fun buildDefaultEnv(tool: String, installDir: File): Map<String, String> = when (tool) {
         "node" -> mapOf("NODE_PATH" to "${installDir.absolutePath}/lib/node_modules")
         "python" -> mapOf("PYTHONHOME" to installDir.absolutePath)
+        // clang needs its sysroot so the compiler can find <stdio.h> etc.
+        "clang" -> mapOf(
+            "CPATH" to "${installDir.absolutePath}/sysroot/usr/include",
+            "LIBRARY_PATH" to "${installDir.absolutePath}/sysroot/usr/lib"
+        )
         else   -> emptyMap()
     }
 

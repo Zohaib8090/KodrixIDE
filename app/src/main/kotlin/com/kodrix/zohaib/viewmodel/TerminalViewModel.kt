@@ -348,6 +348,19 @@ class TerminalViewModel(application: Application) : AndroidViewModel(application
                 } else {
                     _gitVersion.value = "Checking…"
                 }
+
+                // Python
+                val pythonVerified = verified["python"]
+                if (pythonVerified != null && pythonVerified.isVerified) {
+                    val pythonDir = findPythonInstallDir(application.filesDir)
+                    if (pythonDir != null) {
+                        val pylspBin = java.io.File(pythonDir, "bin/pylsp")
+                        if (!pylspBin.exists()) {
+                            Log.d("Kodrix", "Python verified, but pylsp not found. Triggering auto-install...")
+                            installPylspIfNeeded(application.filesDir, null)
+                        }
+                    }
+                }
             }
         }
 
@@ -374,6 +387,16 @@ class TerminalViewModel(application: Application) : AndroidViewModel(application
                 val bundledGit = java.io.File(application.filesDir, "usr/bin/git")
                 if (bundledGit.exists()) {
                     VersionChecker.check("git", expectedVersion = "2.34.0", binaryPath = bundledGit.absolutePath, context = application)
+                }
+            }
+
+            // Python check
+            val pythonDir = findPythonInstallDir(application.filesDir)
+            val activePythonVer = binaryManager.getActiveVersion("python") ?: "3.13.13"
+            if (pythonDir != null) {
+                val pythonBin = java.io.File(pythonDir, "bin/python3")
+                if (pythonBin.exists()) {
+                    VersionChecker.check("python", expectedVersion = activePythonVer, binaryPath = pythonBin.absolutePath, context = application)
                 }
             }
         }
@@ -472,6 +495,10 @@ class TerminalViewModel(application: Application) : AndroidViewModel(application
         "json" -> "json"
         "js", "javascript" -> "javascript"
         "ts", "typescript" -> "typescript"
+        // Native language servers (clangd / pylsp) — handled by startNativeLsp()
+        "c" -> "c"
+        "cpp", "cc", "cxx", "h", "hpp" -> "cpp"
+        "py" -> "python"
         else -> null
     }
 
@@ -481,6 +508,12 @@ class TerminalViewModel(application: Application) : AndroidViewModel(application
         val ext = file.extension.lowercase()
         val langId = getLanguageId(ext) ?: return
         if (activeLSPs.containsKey(ext)) return // already running
+
+        // Route native-binary LSPs (clangd for C/C++, pylsp for Python) away from the Node path
+        if (langId == "c" || langId == "cpp" || langId == "python") {
+            startNativeLsp(langId, ext, file)
+            return
+        }
 
         val proj = _activeProject.value ?: return
         val projDir = java.io.File(projectsRoot, proj)
@@ -741,6 +774,438 @@ class TerminalViewModel(application: Application) : AndroidViewModel(application
             }
         }
     }
+
+    // ── Native LSP (clangd for C/C++, pylsp for Python) ──────────────────────
+
+    /**
+     * Entry-point for C, C++, and Python LSP sessions.
+     * Ensures the required binary (clangd / pylsp) is installed before starting
+     * an [LspClient] connected to it.
+     */
+    private fun startNativeLsp(langId: String, ext: String, file: java.io.File) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val filesDir = getApplication<android.app.Application>().filesDir
+            val proj = _activeProject.value ?: return@launch
+            val projDir = java.io.File(filesDir.parent ?: filesDir.absolutePath, "projects/$proj")
+
+            when (langId) {
+                "c", "cpp" -> {
+                    // Find clangd in the installed clang toolchain
+                    val clangDir = findClangInstallDir(filesDir)
+                    val clangdBin = if (clangDir != null) java.io.File(clangDir, "bin/clangd") else null
+
+                    if (clangdBin == null || !clangdBin.exists()) {
+                        // Toolchain not installed — kick off on-demand download
+                        installCppToolchain(filesDir, file)
+                        return@launch
+                    }
+
+                    val libDir = java.io.File(clangDir, "lib").absolutePath
+                    val sysrootInclude = java.io.File(clangDir, "sysroot/usr/include").absolutePath
+                    val ldPath = "$libDir:${java.io.File(filesDir, "lib").absolutePath}"
+                    val command = listOf(clangdBin.absolutePath, "--stdio")
+                    val env = mapOf(
+                        "LD_LIBRARY_PATH" to ldPath,
+                        "CPATH" to sysrootInclude,
+                        "HOME" to filesDir.absolutePath,
+                        "TMPDIR" to java.io.File(filesDir, "tmp").apply { mkdirs() }.absolutePath
+                    )
+                    launchLspClient(ext, langId, file, projDir, command, env)
+                }
+                "python" -> {
+                    val pythonDir = findPythonInstallDir(filesDir)
+                    val pylspBin = if (pythonDir != null) java.io.File(pythonDir, "bin/pylsp") else null
+
+                    if (pythonDir == null || pylspBin == null || !pylspBin.exists()) {
+                        installPylspIfNeeded(filesDir, file)
+                        return@launch
+                    }
+
+                    val pythonLibDir = java.io.File(pythonDir, "lib").absolutePath
+                    val command = listOf(pylspBin.absolutePath)
+                    val env = mapOf(
+                        "LD_LIBRARY_PATH" to pythonLibDir,
+                        "PYTHONHOME" to pythonDir.absolutePath,
+                        "HOME" to filesDir.absolutePath,
+                        "TMPDIR" to java.io.File(filesDir, "tmp").apply { mkdirs() }.absolutePath
+                    )
+                    launchLspClient(ext, langId, file, projDir, command, env)
+                }
+            }
+        }
+    }
+
+    /** Starts an [LspClient] with the given command + env and sends initialize/didOpen. */
+    private suspend fun launchLspClient(
+        ext: String,
+        langId: String,
+        file: java.io.File,
+        projDir: java.io.File,
+        command: List<String>,
+        env: Map<String, String>
+    ) {
+        val client = LspClient(command = command, workingDir = projDir, env = env)
+        client.onDiagnosticsReceived = { params ->
+            viewModelScope.launch(Dispatchers.Main) {
+                _lspDiagnostics.value = params.diagnostics
+            }
+        }
+        client.start()
+        activeLSPs[ext] = client
+
+        val friendlyLang = when (langId) {
+            "c"      -> "C"
+            "cpp"    -> "C++"
+            "python" -> "Python"
+            else     -> langId.uppercase()
+        }
+        withContext(Dispatchers.Main) {
+            android.widget.Toast.makeText(
+                getApplication(), "🔄 Starting $friendlyLang Language Server...",
+                android.widget.Toast.LENGTH_SHORT
+            ).show()
+        }
+
+        try {
+            val initParams = com.kodrix.zohaib.lsp.InitializeParams(
+                processId = android.os.Process.myPid(),
+                rootUri = "file://${projDir.absolutePath}"
+            )
+            client.request("initialize", initParams)
+            client.notify("initialized", emptyMap<String, String>())
+
+            val text = file.readText()
+            val openParams = com.kodrix.zohaib.lsp.DidOpenTextDocumentParams(
+                textDocument = com.kodrix.zohaib.lsp.TextDocumentItem(
+                    uri = "file://${file.absolutePath}",
+                    languageId = langId,
+                    version = ++lspDocVersion,
+                    text = text
+                )
+            )
+            client.notify("textDocument/didOpen", openParams)
+            Log.d("Kodrix", "Native LSP ($langId) started for ${file.name}")
+
+            withContext(Dispatchers.Main) {
+                android.widget.Toast.makeText(
+                    getApplication(), "✅ $friendlyLang Language Server ready!",
+                    android.widget.Toast.LENGTH_SHORT
+                ).show()
+            }
+        } catch (e: Exception) {
+            Log.e("Kodrix", "Native LSP ($langId) initialization failed", e)
+            withContext(Dispatchers.Main) {
+                android.widget.Toast.makeText(
+                    getApplication(), "❌ $friendlyLang LSP failed to start",
+                    android.widget.Toast.LENGTH_LONG
+                ).show()
+            }
+        }
+    }
+
+    /** Returns the clang install dir (versions/clang/<version>) if any version is active. */
+    private fun findClangInstallDir(filesDir: java.io.File): java.io.File? {
+        val clangRoot = java.io.File(filesDir, "versions/clang")
+        if (!clangRoot.isDirectory) return null
+        return clangRoot.listFiles()
+            ?.filter { it.isDirectory && java.io.File(it, "bin/clangd").exists() }
+            ?.maxByOrNull { it.name }
+    }
+
+    /** Returns the Python install dir (versions/python/<version>) if any version is active. */
+    private fun findPythonInstallDir(filesDir: java.io.File): java.io.File? {
+        val pythonRoot = java.io.File(filesDir, "versions/python")
+        if (!pythonRoot.isDirectory) return null
+        return pythonRoot.listFiles()
+            ?.filter { it.isDirectory && java.io.File(it, "bin/python3").exists() }
+            ?.maxByOrNull { it.name }
+    }
+
+    // ── C/C++ Toolchain installer ─────────────────────────────────────────────
+
+    /**
+     * Downloads the Clang toolchain from official Termux package repositories and installs it
+     * into [filesDir]/versions/clang/21.1.8/.
+     *
+     * Packages downloaded (for the active device ABI):
+     *  - clang (compiler + clangd LSP binary)
+     *  - libllvm (libLLVM.so, libclang-cpp.so — required at runtime)
+     *  - libffi, zstd (libzstd.so), libxml2, liblzma — libLLVM.so dependencies
+     *  - ndk-sysroot — C/C++ system headers (stdio.h, stdlib.h, …) and stub libraries
+     *
+     * Total download is approximately 120-150 MB. A progress Toast is shown every 10 s.
+     *
+     * After extraction the [BinaryManager] is notified so it can create shell wrappers for
+     * clang, clang++, and clangd in usr/bin/.
+     */
+    private fun installCppToolchain(filesDir: java.io.File, fileToOpenAfter: java.io.File) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val abi = android.os.Build.SUPPORTED_ABIS.firstOrNull() ?: "x86_64"
+            val termuxAbi = when {
+                abi.startsWith("arm64") -> "aarch64"
+                abi.startsWith("armeabi") -> "arm"
+                abi == "x86_64" -> "x86_64"
+                abi == "x86" -> "i686"
+                else -> "aarch64"
+            }
+
+            val BASE = "https://packages-cf.termux.dev/apt/termux-main/pool/main"
+            val packages = listOf(
+                "$BASE/c/clang/clang_21.1.8-2_${termuxAbi}.deb",
+                "$BASE/libl/libllvm/libllvm_21.1.8-2_${termuxAbi}.deb",
+                "$BASE/libf/libffi/libffi_3.5.2_${termuxAbi}.deb",
+                "$BASE/z/zstd/zstd_1.5.7-1_${termuxAbi}.deb",
+                "$BASE/libx/libxml2/libxml2_2.15.3_${termuxAbi}.deb",
+                "$BASE/libl/liblzma/liblzma_5.8.3_${termuxAbi}.deb",
+                "$BASE/n/ndk-sysroot/ndk-sysroot_29-2_${termuxAbi}.deb"
+            )
+
+            val installRoot = java.io.File(filesDir, "versions/clang/21.1.8")
+            val tmpDir = java.io.File(filesDir, "tmp/clang_install").also {
+                it.deleteRecursively(); it.mkdirs()
+            }
+
+            withContext(Dispatchers.Main) {
+                android.widget.Toast.makeText(
+                    getApplication(),
+                    "⚙️ Downloading C/C++ toolchain (~150 MB) — this may take a minute...",
+                    android.widget.Toast.LENGTH_LONG
+                ).show()
+            }
+
+            try {
+                for (url in packages) {
+                    val debName = url.substringAfterLast("/")
+                    Log.d("Kodrix", "CppInstall: downloading $debName")
+                    val debFile = java.io.File(tmpDir, debName)
+
+                    // Download .deb
+                    java.net.URL(url).openStream().use { input ->
+                        debFile.outputStream().use { output -> input.copyTo(output) }
+                    }
+
+                    // Extract data.tar.* from the .deb (ar archive)
+                    val dataTar = java.io.File(tmpDir, "${debName}.data.tar")
+                    extractDataTarFromDeb(debFile, dataTar)
+
+                    // Unpack tar into a staging directory, then copy to installRoot
+                    val stagingDir = java.io.File(tmpDir, "${debName}_staging").also { it.mkdirs() }
+                    val tarProc = ProcessBuilder(
+                        "/system/bin/tar", "-xJf", dataTar.absolutePath,
+                        "-C", stagingDir.absolutePath,
+                        "--strip-components=5"   // removes ./data/data/com.termux/files/
+                    ).redirectErrorStream(true).start()
+                    tarProc.waitFor()
+
+                    // Merge staging → installRoot
+                    copyDirContents(stagingDir, installRoot)
+
+                    debFile.delete()
+                    dataTar.delete()
+                    stagingDir.deleteRecursively()
+
+                    Log.d("Kodrix", "CppInstall: installed $debName")
+                }
+
+                // Rename ndk-sysroot's usr/ → installRoot/sysroot/
+                val ndkUsr = java.io.File(installRoot, "usr")
+                if (ndkUsr.isDirectory) {
+                    val sysrootDest = java.io.File(installRoot, "sysroot")
+                    if (!sysrootDest.exists()) ndkUsr.renameTo(sysrootDest)
+                }
+
+                // Make binaries executable
+                java.io.File(installRoot, "bin").listFiles()?.forEach { it.setExecutable(true) }
+
+                // Notify BinaryManager so wrappers (clang, clang++, clangd) are created
+                binaryManager.setActiveVersion("clang", "21.1.8")
+
+                tmpDir.deleteRecursively()
+
+                withContext(Dispatchers.Main) {
+                    android.widget.Toast.makeText(
+                        getApplication(),
+                        "✅ C/C++ toolchain installed! Opening file...",
+                        android.widget.Toast.LENGTH_SHORT
+                    ).show()
+                }
+
+                // Now start the LSP for the file that triggered the install
+                val ext = fileToOpenAfter.extension.lowercase()
+                val langId = getLanguageId(ext) ?: return@launch
+                startNativeLsp(langId, ext, fileToOpenAfter)
+
+            } catch (e: Exception) {
+                Log.e("Kodrix", "CppInstall: failed", e)
+                withContext(Dispatchers.Main) {
+                    android.widget.Toast.makeText(
+                        getApplication(),
+                        "❌ C/C++ toolchain install failed: ${e.message}",
+                        android.widget.Toast.LENGTH_LONG
+                    ).show()
+                }
+                tmpDir.deleteRecursively()
+            }
+        }
+    }
+
+    /**
+     * Extracts the [data.tar.*] member from a Debian .deb file (which is an ar archive)
+     * without relying on any external `ar` binary — pure Kotlin byte-level parsing.
+     */
+    private fun extractDataTarFromDeb(debFile: java.io.File, outputFile: java.io.File) {
+        debFile.inputStream().buffered().use { input ->
+            // Verify ar magic
+            val magic = ByteArray(8)
+            input.read(magic)
+            check(String(magic) == "!<arch>\n") { "Not a valid .deb (ar) file: ${debFile.name}" }
+
+            while (true) {
+                val header = ByteArray(60)
+                val read = input.read(header)
+                if (read < 60) throw java.io.EOFException("Unexpected end of ar archive")
+
+                val memberName = String(header, 0, 16).trim()
+                val memberSize = String(header, 48, 10).trim().toLong()
+
+                if (memberName.startsWith("data.tar")) {
+                    // Found — stream it out to outputFile
+                    var remaining = memberSize
+                    val buf = ByteArray(65536)
+                    outputFile.outputStream().buffered().use { out ->
+                        while (remaining > 0) {
+                            val toRead = minOf(remaining, buf.size.toLong()).toInt()
+                            val n = input.read(buf, 0, toRead)
+                            if (n == -1) break
+                            out.write(buf, 0, n)
+                            remaining -= n
+                        }
+                    }
+                    return
+                } else {
+                    // Skip this member (pad to even byte boundary)
+                    var skipped = 0L
+                    while (skipped < memberSize) {
+                        val n = input.skip(memberSize - skipped)
+                        if (n <= 0) break
+                        skipped += n
+                    }
+                    if (memberSize % 2L != 0L) input.read() // padding byte
+                }
+            }
+        }
+        throw java.io.FileNotFoundException("data.tar.* not found in ${debFile.name}")
+    }
+
+    /** Recursively copies the contents of [src] into [dst], creating dirs as needed. */
+    private fun copyDirContents(src: java.io.File, dst: java.io.File) {
+        if (!src.exists()) return
+        dst.mkdirs()
+        src.walkTopDown().forEach { file ->
+            val rel = file.relativeTo(src)
+            val target = java.io.File(dst, rel.path)
+            if (file.isDirectory) target.mkdirs()
+            else {
+                target.parentFile?.mkdirs()
+                file.copyTo(target, overwrite = true)
+            }
+        }
+    }
+
+    // ── Python pylsp installer ────────────────────────────────────────────────
+
+    /**
+     * Installs `python-lsp-server` (pylsp) into the IDE-managed Python environment
+     * using the bundled pip. After installation restarts the LSP for [fileToOpenAfter].
+     */
+    private fun installPylspIfNeeded(filesDir: java.io.File, fileToOpenAfter: java.io.File?) {
+        viewModelScope.launch(Dispatchers.IO) {
+            Log.d("Kodrix", "installPylspIfNeeded coroutine started")
+            val pythonDir = findPythonInstallDir(filesDir)
+            Log.d("Kodrix", "installPylspIfNeeded: pythonDir = ${pythonDir?.absolutePath}")
+            if (pythonDir == null) {
+                withContext(Dispatchers.Main) {
+                    android.widget.Toast.makeText(
+                        getApplication(),
+                        "⚠️ Python runtime not found — install it from the Marketplace first",
+                        android.widget.Toast.LENGTH_LONG
+                    ).show()
+                }
+                return@launch
+            }
+
+            val python3 = java.io.File(pythonDir, "bin/python3")
+            val pythonLib = java.io.File(pythonDir, "lib").absolutePath
+
+            withContext(Dispatchers.Main) {
+                android.widget.Toast.makeText(
+                    getApplication(),
+                    "⚙️ Installing Python Language Server (pylsp)...",
+                    android.widget.Toast.LENGTH_LONG
+                ).show()
+            }
+
+            try {
+                // Step 1: Install pylsp and jsonrpc without dependencies to bypass ujson C-compilation
+                Log.d("Kodrix", "installPylspIfNeeded: Starting step 1...")
+                val shellCmd1 = "LD_LIBRARY_PATH=\"$pythonLib\" PYTHONHOME=\"${pythonDir.absolutePath}\" HOME=\"${filesDir.absolutePath}\" TMPDIR=\"${java.io.File(filesDir, "tmp").apply { mkdirs() }.absolutePath}\" \"${python3.absolutePath}\" -m pip install python-lsp-server python-lsp-jsonrpc --no-deps --no-warn-script-location -q"
+                val pb1 = ProcessBuilder("/system/bin/sh", "-c", shellCmd1)
+                pb1.redirectErrorStream(true)
+                val proc1 = pb1.start()
+                proc1.inputStream.bufferedReader().forEachLine { Log.d("Kodrix", "pylsp-install-step1: $it") }
+                val exitCode1 = proc1.waitFor()
+                Log.d("Kodrix", "installPylspIfNeeded: Step 1 finished with exit code $exitCode1")
+
+                if (exitCode1 != 0) {
+                    withContext(Dispatchers.Main) {
+                        android.widget.Toast.makeText(
+                            getApplication(), "❌ pylsp install failed at step 1 (exit $exitCode1)",
+                            android.widget.Toast.LENGTH_LONG
+                        ).show()
+                    }
+                    return@launch
+                }
+
+                // Step 2: Install pure-python dependencies (jedi, pluggy, docstring-to-markdown, pytoolconfig)
+                Log.d("Kodrix", "installPylspIfNeeded: Starting step 2...")
+                val shellCmd2 = "LD_LIBRARY_PATH=\"$pythonLib\" PYTHONHOME=\"${pythonDir.absolutePath}\" HOME=\"${filesDir.absolutePath}\" TMPDIR=\"${java.io.File(filesDir, "tmp").apply { mkdirs() }.absolutePath}\" \"${python3.absolutePath}\" -m pip install jedi pluggy docstring-to-markdown pytoolconfig --no-warn-script-location -q"
+                val pb2 = ProcessBuilder("/system/bin/sh", "-c", shellCmd2)
+                pb2.redirectErrorStream(true)
+                val proc2 = pb2.start()
+                proc2.inputStream.bufferedReader().forEachLine { Log.d("Kodrix", "pylsp-install-step2: $it") }
+                val exitCode2 = proc2.waitFor()
+                Log.d("Kodrix", "installPylspIfNeeded: Step 2 finished with exit code $exitCode2")
+
+                if (exitCode2 == 0) {
+                    withContext(Dispatchers.Main) {
+                        android.widget.Toast.makeText(
+                            getApplication(), "✅ pylsp installed successfully!",
+                            android.widget.Toast.LENGTH_SHORT
+                        ).show()
+                    }
+                    if (fileToOpenAfter != null) {
+                        startNativeLsp("python", "py", fileToOpenAfter)
+                    }
+                } else {
+                    withContext(Dispatchers.Main) {
+                        android.widget.Toast.makeText(
+                            getApplication(), "❌ pylsp install failed at step 2 (exit $exitCode2)",
+                            android.widget.Toast.LENGTH_LONG
+                        ).show()
+                    }
+                }
+            } catch (e: Exception) {
+                Log.e("Kodrix", "pylsp install failed", e)
+                withContext(Dispatchers.Main) {
+                    android.widget.Toast.makeText(
+                        getApplication(), "❌ pylsp install error: ${e.message}",
+                        android.widget.Toast.LENGTH_LONG
+                    ).show()
+                }
+            }
+        }
+    }
+
 
     fun requestCompletion(file: java.io.File, text: String, cursorOffset: Int) {
         completionJob?.cancel()

@@ -18,6 +18,8 @@ class SyntaxHighlighter(val extension: String) {
             "md", "markdown" -> formatMarkdown(text)
             "kt", "kts", "java" -> formatCode(text, KOTLIN_KEYWORDS)
             "js", "ts", "json" -> formatCode(text, JS_KEYWORDS)
+            "c", "h", "cpp", "cc", "cxx", "hpp" -> formatCode(text, C_CPP_KEYWORDS)
+            "py", "pyw" -> formatPython(text)
             else -> AnnotatedString(text)
         }
     }
@@ -102,6 +104,42 @@ class SyntaxHighlighter(val extension: String) {
         return builder.toAnnotatedString()
     }
 
+    private fun formatPython(text: String): AnnotatedString {
+        val builder = AnnotatedString.Builder(text)
+        // Keywords
+        val wordRegex = Regex("""\b(\w+)\b""")
+        wordRegex.findAll(text).forEach {
+            if (it.value in PYTHON_KEYWORDS)
+                builder.addStyle(SpanStyle(color = Color(0xFFFF7B72)), it.range.first, it.range.last + 1)
+        }
+        // Strings (single + double quoted, single line)
+        val stringRegex = Regex("\"(.*?)\"|'(.*?)'")
+        stringRegex.findAll(text).forEach {
+            builder.addStyle(SpanStyle(color = Color(0xFFA5D6FF)), it.range.first, it.range.last + 1)
+        }
+        // Triple-quoted strings
+        val tripleRegex = Regex("\"\"\"[\\s\\S]*?\"\"\"|'''[\\s\\S]*?'''")
+        tripleRegex.findAll(text).forEach {
+            builder.addStyle(SpanStyle(color = Color(0xFFA5D6FF)), it.range.first, it.range.last + 1)
+        }
+        // Comments (#)
+        val commentRegex = Regex("#.*")
+        commentRegex.findAll(text).forEach {
+            builder.addStyle(SpanStyle(color = Color(0xFF8B949E)), it.range.first, it.range.last + 1)
+        }
+        // Numbers
+        val numRegex = Regex("""\b\d+\.?\d*\b""")
+        numRegex.findAll(text).forEach {
+            builder.addStyle(SpanStyle(color = Color(0xFF79C0FF)), it.range.first, it.range.last + 1)
+        }
+        // Function calls
+        val funcRegex = Regex("""\b(\w+)(?=\s*\()""")
+        funcRegex.findAll(text).forEach {
+            builder.addStyle(SpanStyle(color = Color(0xFFD2A8FF)), it.range.first, it.range.last + 1)
+        }
+        return builder.toAnnotatedString()
+    }
+
     companion object {
         val KOTLIN_KEYWORDS = setOf(
             "package", "import", "class", "interface", "fun", "val", "var", "if", "else", "for", "while", "when", 
@@ -112,6 +150,27 @@ class SyntaxHighlighter(val extension: String) {
             "import", "from", "export", "default", "class", "function", "const", "let", "var", "if", "else", "for", 
             "while", "switch", "case", "break", "continue", "return", "try", "catch", "finally", "throw", "new", 
             "this", "super", "null", "true", "false", "undefined", "async", "await", "yield", "static"
+        )
+        val C_CPP_KEYWORDS = setOf(
+            "auto", "break", "case", "char", "const", "continue", "default", "do", "double", "else",
+            "enum", "extern", "float", "for", "goto", "if", "inline", "int", "long", "register",
+            "return", "short", "signed", "sizeof", "static", "struct", "switch", "typedef", "union",
+            "unsigned", "void", "volatile", "while",
+            // C++ extras
+            "class", "namespace", "template", "typename", "public", "private", "protected",
+            "virtual", "override", "final", "new", "delete", "this", "true", "false", "nullptr",
+            "bool", "catch", "throw", "try", "using", "operator", "friend", "explicit",
+            "constexpr", "noexcept", "decltype", "auto", "static_cast", "dynamic_cast",
+            "reinterpret_cast", "const_cast", "include", "define", "ifdef", "ifndef", "endif",
+            "pragma", "std", "string", "vector", "map", "set", "list", "pair", "cout", "cin", "endl"
+        )
+        val PYTHON_KEYWORDS = setOf(
+            "False", "None", "True", "and", "as", "assert", "async", "await", "break", "class",
+            "continue", "def", "del", "elif", "else", "except", "finally", "for", "from",
+            "global", "if", "import", "in", "is", "lambda", "nonlocal", "not", "or", "pass",
+            "raise", "return", "try", "while", "with", "yield",
+            "print", "len", "range", "type", "isinstance", "str", "int", "float", "list",
+            "dict", "set", "tuple", "bool", "open", "super", "self", "cls", "object"
         )
     }
 }

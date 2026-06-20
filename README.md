@@ -2,7 +2,7 @@
 
 <img src="https://img.shields.io/badge/Platform-Android%2010%2B-3DDC84?style=for-the-badge&logo=android&logoColor=white"/>
 <img src="https://img.shields.io/badge/Architecture-Multi--Arch-FF6B35?style=for-the-badge"/>
-<img src="https://img.shields.io/badge/License-Source--Available-red?style=for-the-badge"/>
+<img src="https://img.shields.io/badge/License-MIT-green?style=for-the-badge"/>
 <img src="https://img.shields.io/badge/Status-Alpha-orange?style=for-the-badge"/>
 <img src="https://img.shields.io/badge/Version-1.1.2-blue?style=for-the-badge"/>
 <img src="https://img.shields.io/github/stars/Zohaib8090/KodrixIDE?style=for-the-badge"/>
@@ -18,7 +18,7 @@
 
 *Built by [@Zohaib8090](https://github.com/Zohaib8090) — 17 years old, Karachi, Pakistan*
 
-[Download APK](https://github.com/Zohaib8090/KodrixIDE/releases) · [Website](https://github.com/Zohaib8090/KodrixIDE) · [Report Bug](https://github.com/Zohaib8090/KodrixIDE/issues) · [Request Feature](https://github.com/Zohaib8090/KodrixIDE/discussions)
+[Website](https://kodrixide.duckdns.org) · [Download APK](https://github.com/Zohaib8090/KodrixIDE/releases) · [Report Bug](https://github.com/Zohaib8090/KodrixIDE/issues) · [Request Feature](https://github.com/Zohaib8090/KodrixIDE/discussions)
 
 </div>
 
@@ -119,7 +119,7 @@ Clone a repo, install npm packages, interpret Python scripts, compile low-level 
 ## Supported Frameworks & Languages
 
 | Target | Status | Notes |
-|-----------|--------|-------|
+|--------|--------|-------|
 | Python 3 | ✅ Working | Full runtime environment support |
 | React + Vite | ✅ Working | Use `@vitejs/plugin-react` (not swc variant) |
 | Express / Node.js | ✅ Working | Full support |
@@ -131,6 +131,8 @@ Clone a repo, install npm packages, interpret Python scripts, compile low-level 
 ---
 
 ## Architecture
+
+```
 Kodrix
 ├── Kotlin / Jetpack Compose (UI layer)
 ├── JNI Bridge (native-lib.cpp)
@@ -152,6 +154,8 @@ Kodrix
 │   ├── libssl.so / libcrypto.so (OpenSSL 3.x)
 │   └── libicui18n/uc/data.so (Unicode support)
 └── Zero-Termux Policy (no external dependencies)
+```
+
 ---
 
 ## Building from Source
@@ -159,106 +163,90 @@ Kodrix
 > For developers who want to modify or contribute to Kodrix.
 
 **Prerequisites:**
-- Android Studio Hedgehog or newer
+- Android Studio Ladybug or newer
 - Android NDK r27+
 - CMake 3.22+
 - JDK 17+
 - Rust (for SWC binary compilation)
 
 ```bash
-git clone [https://github.com/Zohaib8090/KodrixIDE.git](https://github.com/Zohaib8090/KodrixIDE.git)
+git clone https://github.com/Zohaib8090/KodrixIDE.git
 cd KodrixIDE
-./gradlew assembleDebug
-APK output: app/build/outputs/apk/debug/app-debug.apk
-___
+./gradlew assembleRelease
+# APK output: app/build/outputs/apk/release/
+```
+
+---
+
 ## Roadmap
-[x] Terminal with PTY
 
-[x] Git clone over HTTPS
+- [x] Terminal with PTY
+- [x] Git clone over HTTPS
+- [x] GitHub OAuth login
+- [x] npm install
+- [x] React + Vite support
+- [x] Next.js support
+- [x] Built-in browser with DevTools
+- [x] Port forwarding (bore.pub)
+- [x] Multi-file tabs + split screen
+- [x] Source control UI
+- [x] Debug console + Logcat
+- [x] Extension marketplace UI
+- [x] Auto update notifications
+- [x] Node/Git binary auto-update system
+- [x] Termux terminal emulator integration
+- [x] Syntax highlighting
+- [x] Smart keyboard row
+- [x] Run & Debug panel
+- [x] Native Python 3 execution runtime
+- [x] Multi-Architecture binary build profiles
+- [x] LSP autocomplete implementation (language packs framework)
+- [x] Integrated AI Agent loop (Gemini interface layer)
+- [ ] Native C/C++ cross-compiler toolchain integration (Clang/GCC)
+- [ ] React Native support
+- [ ] Flutter support
 
-[x] GitHub OAuth login
+---
 
-[x] npm install
+## Known Limitations
 
-[x] React + Vite support
+| Limitation | Reason | Planned Fix |
+|------------|--------|-------------|
+| No iOS support | Platform limitation | Not planned |
+| Turbopack not supported | Needs native SWC recompile | In progress |
 
-[x] Next.js support
+---
 
-[x] Built-in browser with DevTools
+## Found a Bug?
 
-[x] Port forwarding (bore.pub)
-
-[x] Multi-file tabs + split screen
-
-[x] Source control UI
-
-[x] Debug console + Logcat
-
-[x] Extension marketplace UI
-
-[x] Auto update notifications
-
-[x] Node/Git binary auto-update system
-
-[x] Termux terminal emulator integration
-
-[x] Syntax highlighting
-
-[x] Smart keyboard row
-
-[x] Run & Debug panel
-
-[x] Native Python 3 execution runtime
-
-[x] Multi-Architecture binary build profiles
-
-[x] LSP autocomplete implementation (language packs framework)
-
-[x] Integrated AI Agent loop (Gemini interface layer)
-
-[ ] Native C/C++ cross-compiler toolchain integration (Clang/GCC)
-
-[ ] React Native support
-
-[ ] Flutter support
-
-Known Limitations
-
-
-Limitation                  Reason                      Planned Fix
-No iOS support              Platform limitation         Not planned
-Turbopack not supported     Needs native SWC recompile  In progress
-
-Found a Bug?
 Open an issue on GitHub with steps to reproduce.
 
-Use Case,Allowed
-🧑‍💻 Personal use & learning,✅ Free
-🎓 Education & bootcamps,✅ Free
-🏗️ Private non-commercial projects,✅ Free
-💰 Commercial / revenue-generating use,💳 Paid license required
-🔁 Redistribution or cloning,❌ Not allowed
-🏭 Building a competing IDE,❌ Not allowed
+---
 
-For commercial licensing: contact @ZohaibBaig144 on X.
+## Acknowledgements
 
-Acknowledgements
-libgit2 — Git operations
+- [libgit2](https://libgit2.org/) — Git operations
+- [Termux](https://termux.dev/) — Terminal emulator library
+- [Node.js](https://nodejs.org/) — JavaScript runtime
+- [Python](https://www.python.org/) — Python interpreter backend
+- [Google Gemini](https://deepmind.google/technologies/gemini/) — AI Agent infrastructure
+- [bore](https://github.com/ekzhang/bore) — Port forwarding
+- [Open VSX](https://open-vsx.org/) — Extension marketplace
 
-Termux — Terminal emulator library
+---
 
-Node.js — JavaScript runtime
+## License
 
-Python — Python interpreter backend
+MIT License — see [LICENSE](LICENSE) for details.
 
-Google Gemini — AI Agent infrastructure
+---
 
-bore — Port forwarding
-
-Open VSX — Extension marketplace
+<div align="center">
 
 Made with ❤️ by a 17-year-old developer from Karachi, Pakistan
 
-If Kodrix helps you, consider sponsoring
+If Kodrix helps you, consider [sponsoring](https://github.com/sponsors/Zohaib8090)
 
 ⭐ Star this repo if you find it useful!
+
+</div>

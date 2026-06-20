@@ -163,3 +163,36 @@ data class MarkupContent(
     val kind: String,
     val value: String
 )
+
+// Hover
+data class HoverParams(
+    val textDocument: TextDocumentIdentifier,
+    val position: Position
+)
+
+data class HoverResult(
+    val contents: com.google.gson.JsonElement? = null,
+    val range: Range? = null
+)
+
+// Go-to-Definition
+data class DefinitionParams(
+    val textDocument: TextDocumentIdentifier,
+    val position: Position
+)
+
+data class Location(
+    val uri: String,
+    val range: Range
+)
+
+// Code Actions
+data class CodeActionParams(
+    val textDocument: TextDocumentIdentifier,
+    val range: Range,
+    val context: CodeActionContext
+)
+
+data class CodeActionContext(
+    val diagnostics: List<Diagnostic> = emptyList()
+)

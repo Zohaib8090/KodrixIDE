@@ -108,7 +108,9 @@ class TerminalViewModel(application: Application) : AndroidViewModel(application
     private val _completionItems = MutableStateFlow<List<com.kodrix.zohaib.lsp.CompletionItem>>(emptyList())
     val completionItems = _completionItems.asStateFlow()
     private var completionJob: kotlinx.coroutines.Job? = null
+    private var completionDebounceJob: Job? = null
     private var lspDocVersion = 0
+    private var isInstallingCpp = false
 
     private val aiManager = com.kodrix.zohaib.ai.AIBackendManager(application)
     val binaryManager = com.kodrix.zohaib.bridge.BinaryManager(application)
@@ -682,6 +684,7 @@ class TerminalViewModel(application: Application) : AndroidViewModel(application
         activeLSPs.values.forEach { it.stop() }
         activeLSPs.clear()
         _lspDiagnostics.value = emptyList()
+        _completionItems.value = emptyList() // Clear completions too
     }
 
     private fun installSpecificLSP(langId: String, fileToOpenAfter: java.io.File) {
@@ -786,13 +789,19 @@ class TerminalViewModel(application: Application) : AndroidViewModel(application
         viewModelScope.launch(Dispatchers.IO) {
             val filesDir = getApplication<android.app.Application>().filesDir
             val proj = _activeProject.value ?: return@launch
-            val projDir = java.io.File(filesDir.parent ?: filesDir.absolutePath, "projects/$proj")
+            val projDir = java.io.File(projectsRoot, proj)
 
             when (langId) {
                 "c", "cpp" -> {
                     // Find clangd in the installed clang toolchain
                     val clangDir = findClangInstallDir(filesDir)
-                    val clangdBin = if (clangDir != null) java.io.File(clangDir, "bin/clangd") else null
+                    // Clang .deb packages extract into usr/ subdirectory (Termux layout)
+                    val clangdBin = when {
+                        clangDir == null -> null
+                        java.io.File(clangDir, "usr/bin/clangd").exists() -> java.io.File(clangDir, "usr/bin/clangd")
+                        java.io.File(clangDir, "bin/clangd").exists()     -> java.io.File(clangDir, "bin/clangd")
+                        else -> null
+                    }
 
                     if (clangdBin == null || !clangdBin.exists()) {
                         // Toolchain not installed — kick off on-demand download
@@ -800,10 +809,18 @@ class TerminalViewModel(application: Application) : AndroidViewModel(application
                         return@launch
                     }
 
-                    val libDir = java.io.File(clangDir, "lib").absolutePath
+                    val binDir  = clangdBin.parentFile!!.absolutePath
+                    val libDir  = java.io.File(clangDir!!, "usr/lib").takeIf { it.isDirectory }?.absolutePath
+                               ?: java.io.File(clangDir, "lib").absolutePath
                     val sysrootInclude = java.io.File(clangDir, "sysroot/usr/include").absolutePath
                     val ldPath = "$libDir:${java.io.File(filesDir, "lib").absolutePath}"
-                    val command = listOf(clangdBin.absolutePath, "--stdio")
+                    val nativeLibPath = getApplication<android.app.Application>().applicationInfo.nativeLibraryDir
+                    val cmd = "export PATH='$binDir:$filesDir/bin:$filesDir/usr/bin:$nativeLibPath:/system/bin:/system/xbin'; " +
+                              "export LD_LIBRARY_PATH='$ldPath'; " +
+                              "export CPATH='$sysrootInclude'; " +
+                              "exec '${clangdBin.absolutePath}' --stdio"
+
+                    val command = listOf("/system/bin/sh", "-c", cmd)
                     val env = mapOf(
                         "LD_LIBRARY_PATH" to ldPath,
                         "CPATH" to sysrootInclude,
@@ -822,7 +839,14 @@ class TerminalViewModel(application: Application) : AndroidViewModel(application
                     }
 
                     val pythonLibDir = java.io.File(pythonDir, "lib").absolutePath
-                    val command = listOf(pylspBin.absolutePath)
+                    val pythonBin = java.io.File(pythonDir, "bin/python3").absolutePath
+                    val nativeLibPath = getApplication<android.app.Application>().applicationInfo.nativeLibraryDir
+                    val cmd = "export PATH='${pythonDir.absolutePath}/bin:$filesDir/bin:$filesDir/usr/bin:$nativeLibPath:/system/bin:/system/xbin'; " +
+                              "export LD_LIBRARY_PATH='$pythonLibDir'; " +
+                              "export PYTHONHOME='${pythonDir.absolutePath}'; " +
+                              "exec '$pythonBin' '${pylspBin.absolutePath}'"
+
+                    val command = listOf("/system/bin/sh", "-c", cmd)
                     val env = mapOf(
                         "LD_LIBRARY_PATH" to pythonLibDir,
                         "PYTHONHOME" to pythonDir.absolutePath,
@@ -908,7 +932,10 @@ class TerminalViewModel(application: Application) : AndroidViewModel(application
         val clangRoot = java.io.File(filesDir, "versions/clang")
         if (!clangRoot.isDirectory) return null
         return clangRoot.listFiles()
-            ?.filter { it.isDirectory && java.io.File(it, "bin/clangd").exists() }
+            ?.filter { it.isDirectory &&
+                // clangd lives at usr/bin/clangd (Termux .deb layout after --strip-components=5)
+                (java.io.File(it, "usr/bin/clangd").exists() ||
+                 java.io.File(it, "bin/clangd").exists()) }
             ?.maxByOrNull { it.name }
     }
 
@@ -939,6 +966,14 @@ class TerminalViewModel(application: Application) : AndroidViewModel(application
      * clang, clang++, and clangd in usr/bin/.
      */
     private fun installCppToolchain(filesDir: java.io.File, fileToOpenAfter: java.io.File) {
+        // Guard against concurrent installs (e.g. user switching C++ files mid-download)
+        synchronized(this) {
+            if (isInstallingCpp) {
+                Log.d("Kodrix", "installCppToolchain: already in progress, ignoring duplicate request")
+                return
+            }
+            isInstallingCpp = true
+        }
         viewModelScope.launch(Dispatchers.IO) {
             val abi = android.os.Build.SUPPORTED_ABIS.firstOrNull() ?: "x86_64"
             val termuxAbi = when {
@@ -974,30 +1009,85 @@ class TerminalViewModel(application: Application) : AndroidViewModel(application
             }
 
             try {
-                for (url in packages) {
+                binaryManager.showProgressNotification("clang", "21.1.8", "downloading", 0f)
+                for ((index, url) in packages.withIndex()) {
                     val debName = url.substringAfterLast("/")
                     Log.d("Kodrix", "CppInstall: downloading $debName")
                     val debFile = java.io.File(tmpDir, debName)
 
-                    // Download .deb
-                    java.net.URL(url).openStream().use { input ->
-                        debFile.outputStream().use { output -> input.copyTo(output) }
+                    // Download .deb with redirect following and progress reporting
+                    val conn = java.net.URL(url).openConnection() as java.net.HttpURLConnection
+                    conn.connectTimeout = 10000
+                    conn.readTimeout = 30000
+                    var finalConn = conn
+                    var redirects = 0
+                    while (redirects < 5) {
+                        val code = finalConn.responseCode
+                        if (code in 301..308) {
+                            val loc = finalConn.getHeaderField("Location") ?: break
+                            finalConn.disconnect()
+                            finalConn = java.net.URL(loc).openConnection() as java.net.HttpURLConnection
+                            finalConn.connectTimeout = 10000
+                            finalConn.readTimeout = 30000
+                            redirects++
+                        } else {
+                            break
+                        }
                     }
 
-                    // Extract data.tar.* from the .deb (ar archive)
-                    val dataTar = java.io.File(tmpDir, "${debName}.data.tar")
-                    extractDataTarFromDeb(debFile, dataTar)
+                    val totalBytes = finalConn.contentLength.toLong()
+                    var downloaded = 0L
+                    finalConn.inputStream.use { input ->
+                        debFile.outputStream().use { output ->
+                            val buffer = ByteArray(8192)
+                            var read = input.read(buffer)
+                            var lastUpdate = System.currentTimeMillis()
+                            while (read != -1) {
+                                output.write(buffer, 0, read)
+                                downloaded += read
+                                val now = System.currentTimeMillis()
+                                if (now - lastUpdate > 300) {
+                                    val fileProgress = if (totalBytes > 0) downloaded.toFloat() / totalBytes else 0f
+                                    val overallProgress = (index + fileProgress) / packages.size
+                                    binaryManager.showProgressNotification("clang", "21.1.8", "downloading", overallProgress)
+                                    lastUpdate = now
+                                }
+                                read = input.read(buffer)
+                            }
+                        }
+                    }
 
-                    // Unpack tar into a staging directory, then copy to installRoot
+                    // Step 1: Extract the raw data.tar.xz member from the .deb (ar archive)
+                    binaryManager.showProgressNotification("clang", "21.1.8", "extracting $debName", (index + 0.9f) / packages.size)
+                    val dataTarXz = java.io.File(tmpDir, "${debName}.data.tar.xz")
+                    extractDataTarFromDeb(debFile, dataTarXz)
+
+                    // Step 2: Decompress .xz → plain .tar in pure Java (no system xz needed)
+                    val dataTar = java.io.File(tmpDir, "${debName}.data.tar")
+                    java.io.FileInputStream(dataTarXz).use { fis ->
+                        org.tukaani.xz.XZInputStream(fis).use { xzis ->
+                            java.io.FileOutputStream(dataTar).use { fos ->
+                                xzis.copyTo(fos)
+                            }
+                        }
+                    }
+                    dataTarXz.delete()
+
+                    // Step 3: Unpack the plain tar (no -J flag needed; already decompressed)
+                    binaryManager.showProgressNotification("clang", "21.1.8", "unpacking $debName", (index + 0.95f) / packages.size)
                     val stagingDir = java.io.File(tmpDir, "${debName}_staging").also { it.mkdirs() }
                     val tarProc = ProcessBuilder(
-                        "/system/bin/tar", "-xJf", dataTar.absolutePath,
+                        "/system/bin/tar", "-xf", dataTar.absolutePath,
                         "-C", stagingDir.absolutePath,
                         "--strip-components=5"   // removes ./data/data/com.termux/files/
                     ).redirectErrorStream(true).start()
-                    tarProc.waitFor()
+                    val tarOutput = tarProc.inputStream.bufferedReader().readText()
+                    val tarExit = tarProc.waitFor()
+                    if (tarExit != 0) {
+                        throw RuntimeException("tar failed (exit $tarExit) for $debName: $tarOutput")
+                    }
 
-                    // Merge staging → installRoot
+                    // Step 4: Merge staging → installRoot
                     copyDirContents(stagingDir, installRoot)
 
                     debFile.delete()
@@ -1007,20 +1097,29 @@ class TerminalViewModel(application: Application) : AndroidViewModel(application
                     Log.d("Kodrix", "CppInstall: installed $debName")
                 }
 
-                // Rename ndk-sysroot's usr/ → installRoot/sysroot/
-                val ndkUsr = java.io.File(installRoot, "usr")
-                if (ndkUsr.isDirectory) {
-                    val sysrootDest = java.io.File(installRoot, "sysroot")
-                    if (!sysrootDest.exists()) ndkUsr.renameTo(sysrootDest)
-                }
+                binaryManager.showProgressNotification("clang", "21.1.8", "verifying", 1.0f)
+
+                // Move ndk-sysroot's headers and libs into installRoot/sysroot/
+                // We intentionally do NOT rename the entire usr/ directory because
+                // clangd (and other clang binaries) live at usr/bin/ and must stay there.
+                val sysrootDest = java.io.File(installRoot, "sysroot").also { it.mkdirs() }
+                val ndkInclude = java.io.File(installRoot, "usr/include")
+                val ndkLib     = java.io.File(installRoot, "usr/lib")
+                if (ndkInclude.isDirectory) ndkInclude.renameTo(java.io.File(sysrootDest, "usr/include").also { it.parentFile?.mkdirs() })
+                if (ndkLib.isDirectory)     ndkLib.renameTo(java.io.File(sysrootDest, "usr/lib").also { it.parentFile?.mkdirs() })
 
                 // Make binaries executable
+                java.io.File(installRoot, "usr/bin").listFiles()?.forEach { it.setExecutable(true) }
                 java.io.File(installRoot, "bin").listFiles()?.forEach { it.setExecutable(true) }
 
-                // Notify BinaryManager so wrappers (clang, clang++, clangd) are created
-                binaryManager.setActiveVersion("clang", "21.1.8")
+                // Mark clang installed without running the binary — Clang is a cross-compiled
+                // Termux/Bionic binary and cannot self-execute inside the Android app sandbox,
+                // so VersionChecker would always fail and roll back the installation.
+                binaryManager.markToolInstalled("clang", "21.1.8")
 
                 tmpDir.deleteRecursively()
+                binaryManager.cancelProgressNotification()
+                binaryManager.showCompletionNotification("clang", "21.1.8", true)
 
                 withContext(Dispatchers.Main) {
                     android.widget.Toast.makeText(
@@ -1037,6 +1136,8 @@ class TerminalViewModel(application: Application) : AndroidViewModel(application
 
             } catch (e: Exception) {
                 Log.e("Kodrix", "CppInstall: failed", e)
+                binaryManager.cancelProgressNotification()
+                binaryManager.showCompletionNotification("clang", "21.1.8", false, e.message)
                 withContext(Dispatchers.Main) {
                     android.widget.Toast.makeText(
                         getApplication(),
@@ -1045,6 +1146,9 @@ class TerminalViewModel(application: Application) : AndroidViewModel(application
                     ).show()
                 }
                 tmpDir.deleteRecursively()
+            } finally {
+                // Always release the guard so a retry is possible after failure
+                synchronized(this@TerminalViewModel) { isInstallingCpp = false }
             }
         }
     }
@@ -1097,17 +1201,35 @@ class TerminalViewModel(application: Application) : AndroidViewModel(application
         throw java.io.FileNotFoundException("data.tar.* not found in ${debFile.name}")
     }
 
-    /** Recursively copies the contents of [src] into [dst], creating dirs as needed. */
+    /** Recursively copies the contents of [src] into [dst], creating dirs as needed.
+     *  Symlinks (common in Termux .deb packages) are recreated as symlinks rather than
+     *  copied as plain files, which avoids "source file doesn't exist" errors on broken links. */
     private fun copyDirContents(src: java.io.File, dst: java.io.File) {
         if (!src.exists()) return
         dst.mkdirs()
-        src.walkTopDown().forEach { file ->
-            val rel = file.relativeTo(src)
-            val target = java.io.File(dst, rel.path)
-            if (file.isDirectory) target.mkdirs()
-            else {
-                target.parentFile?.mkdirs()
-                file.copyTo(target, overwrite = true)
+        val srcPath = src.toPath()
+        val dstPath = dst.toPath()
+        src.walkTopDown().onFail { _, _ -> /* skip unreadable entries */ }.forEach { file ->
+            val filePath = file.toPath()
+            val rel     = srcPath.relativize(filePath)
+            val target  = dstPath.resolve(rel)
+            when {
+                java.nio.file.Files.isSymbolicLink(filePath) -> {
+                    // Recreate the symlink at the destination (don't try to copy it as a file)
+                    val linkTarget = java.nio.file.Files.readSymbolicLink(filePath)
+                    try {
+                        java.nio.file.Files.deleteIfExists(target)
+                        target.parent?.toFile()?.mkdirs()
+                        java.nio.file.Files.createSymbolicLink(target, linkTarget)
+                    } catch (e: Exception) {
+                        Log.w("Kodrix", "copyDirContents: skipping symlink $rel → $linkTarget: ${e.message}")
+                    }
+                }
+                file.isDirectory -> target.toFile().mkdirs()
+                file.isFile -> {
+                    target.parent?.toFile()?.mkdirs()
+                    file.copyTo(target.toFile(), overwrite = true)
+                }
             }
         }
     }
@@ -1147,8 +1269,9 @@ class TerminalViewModel(application: Application) : AndroidViewModel(application
 
             try {
                 // Step 1: Install pylsp and jsonrpc without dependencies to bypass ujson C-compilation
+                binaryManager.showProgressNotification("pylsp", "latest", "Installing core packages (Step 1/2)...", 0.1f)
                 Log.d("Kodrix", "installPylspIfNeeded: Starting step 1...")
-                val shellCmd1 = "LD_LIBRARY_PATH=\"$pythonLib\" PYTHONHOME=\"${pythonDir.absolutePath}\" HOME=\"${filesDir.absolutePath}\" TMPDIR=\"${java.io.File(filesDir, "tmp").apply { mkdirs() }.absolutePath}\" \"${python3.absolutePath}\" -m pip install python-lsp-server python-lsp-jsonrpc --no-deps --no-warn-script-location -q"
+                val shellCmd1 = "LD_LIBRARY_PATH=\"$pythonLib\" PYTHONHOME=\"${pythonDir.absolutePath}\" HOME=\"${filesDir.absolutePath}\" TMPDIR=\"${java.io.File(filesDir, "tmp").apply { mkdirs() }.absolutePath}\" \"${python3.absolutePath}\" -m pip install python-lsp-server python-lsp-jsonrpc --force-reinstall --no-deps --no-warn-script-location -q"
                 val pb1 = ProcessBuilder("/system/bin/sh", "-c", shellCmd1)
                 pb1.redirectErrorStream(true)
                 val proc1 = pb1.start()
@@ -1157,6 +1280,8 @@ class TerminalViewModel(application: Application) : AndroidViewModel(application
                 Log.d("Kodrix", "installPylspIfNeeded: Step 1 finished with exit code $exitCode1")
 
                 if (exitCode1 != 0) {
+                    binaryManager.cancelProgressNotification()
+                    binaryManager.showCompletionNotification("pylsp", "latest", false, "Core installation failed (exit $exitCode1)")
                     withContext(Dispatchers.Main) {
                         android.widget.Toast.makeText(
                             getApplication(), "❌ pylsp install failed at step 1 (exit $exitCode1)",
@@ -1167,6 +1292,7 @@ class TerminalViewModel(application: Application) : AndroidViewModel(application
                 }
 
                 // Step 2: Install pure-python dependencies (jedi, pluggy, docstring-to-markdown, pytoolconfig)
+                binaryManager.showProgressNotification("pylsp", "latest", "Installing dependencies (Step 2/2)...", 0.5f)
                 Log.d("Kodrix", "installPylspIfNeeded: Starting step 2...")
                 val shellCmd2 = "LD_LIBRARY_PATH=\"$pythonLib\" PYTHONHOME=\"${pythonDir.absolutePath}\" HOME=\"${filesDir.absolutePath}\" TMPDIR=\"${java.io.File(filesDir, "tmp").apply { mkdirs() }.absolutePath}\" \"${python3.absolutePath}\" -m pip install jedi pluggy docstring-to-markdown pytoolconfig --no-warn-script-location -q"
                 val pb2 = ProcessBuilder("/system/bin/sh", "-c", shellCmd2)
@@ -1176,7 +1302,9 @@ class TerminalViewModel(application: Application) : AndroidViewModel(application
                 val exitCode2 = proc2.waitFor()
                 Log.d("Kodrix", "installPylspIfNeeded: Step 2 finished with exit code $exitCode2")
 
+                binaryManager.cancelProgressNotification()
                 if (exitCode2 == 0) {
+                    binaryManager.showCompletionNotification("pylsp", "latest", true)
                     withContext(Dispatchers.Main) {
                         android.widget.Toast.makeText(
                             getApplication(), "✅ pylsp installed successfully!",
@@ -1187,6 +1315,7 @@ class TerminalViewModel(application: Application) : AndroidViewModel(application
                         startNativeLsp("python", "py", fileToOpenAfter)
                     }
                 } else {
+                    binaryManager.showCompletionNotification("pylsp", "latest", false, "Dependency installation failed (exit $exitCode2)")
                     withContext(Dispatchers.Main) {
                         android.widget.Toast.makeText(
                             getApplication(), "❌ pylsp install failed at step 2 (exit $exitCode2)",
@@ -1196,6 +1325,8 @@ class TerminalViewModel(application: Application) : AndroidViewModel(application
                 }
             } catch (e: Exception) {
                 Log.e("Kodrix", "pylsp install failed", e)
+                binaryManager.cancelProgressNotification()
+                binaryManager.showCompletionNotification("pylsp", "latest", false, e.message)
                 withContext(Dispatchers.Main) {
                     android.widget.Toast.makeText(
                         getApplication(), "❌ pylsp install error: ${e.message}",
@@ -1664,8 +1795,7 @@ class TerminalViewModel(application: Application) : AndroidViewModel(application
                     {
                       "name": "codeoss-lsp",
                       "version": "1.0.0",
-                      "description": "LSP packages for CodeOSS",
-                      "dependencies": {}
+                      "description": "L
                     }
                 """.trimIndent())
             }
@@ -2196,7 +2326,7 @@ class TerminalViewModel(application: Application) : AndroidViewModel(application
         }
         val pathEnv = buildString {
             if (activeNodeBinDir != null) append("$activeNodeBinDir:")
-            append("$filesDirPath/usr/bin:$filesDirPath/bin:$nativeLibPath:/system/bin:/system/xbin")
+            append("${filesDir.absolutePath}/usr/bin:${filesDir.absolutePath}/bin:$nativeLibPath:/system/bin:/system/xbin")
         }
         val env = pb.environment()
         env["HOME"] = filesDirPath

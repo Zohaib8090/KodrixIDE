@@ -1,34 +1,92 @@
-# CodeOSS Android - Project Handoff
+# Kodrix — Project Handoff
 
-Hello Cline! You are taking over development for **CodeOSS Android**, a native Android code editor that embeds a full Node.js environment and supports VS Code Language Server Protocol (LSP) extensions natively on the phone.
+Hello! You are taking over development for **Kodrix**, a native Android IDE that runs entirely on-device — no Termux, no PC, no remote server required.
+
+---
 
 ## Architecture Overview
+
 - **App Stack:** Native Android (Kotlin, Jetpack Compose).
-- **Embedded Node.js:** The app bundles a Termux-based Node.js runtime. 
-- **LSP Bridge:** We run Language Servers (like `html-languageserver`) in the background. The app communicates with them over standard I/O (stdin/stdout) using JSON-RPC.
-- **Native SWC:** The app now bundles native SWC binaries for Next.js and high-performance React compilation.
+- **Embedded Node.js v25:** Bundled as `libnode.so` in `jniLibs/`. Used for JS/TS/HTML/CSS/JSON/Bash LSPs and running web apps.
+- **Embedded Python 3.13:** Downloaded from GitHub Releases as a `.zip` and extracted by `BinaryManager`. Used for Python execution and `pylsp`.
+- **Clang 21.1.8 (C/C++):** Downloaded on-demand from Termux package repositories as `.deb` files. Extracted using pure-Java XZ decompression (`org.tukaani:xz`) and Toybox `tar`.
+- **LSP Bridge:** Language servers run in background processes. The app communicates via STDIO (stdin/stdout) using JSON-RPC 2.0. See `LspClient.kt`.
+- **Git Bridge:** `libgit2.so` JNI bridge for clone/commit/push/pull over HTTPS.
+- **Native SWC:** Bundled native SWC binaries for Next.js high-performance compilation.
 
-## Current State (Phase 4a - In Progress)
-The core infrastructure for the IDE is now fully operational:
-- **Native SWC Integration (Complete)**: Next.js builds are now supported via bundled `aarch64-linux-android` binaries and `$ORIGIN` patching.
-- **LSP Bridge (Complete)**: The `LspClient.kt` streaming engine and JSON-RPC bridge are functional.
-- **Editor UI (In Progress)**: Autocomplete dropdowns and real-time Diagnostics are partially implemented.
-- **APK Verified**: The latest build has been successfully installed and verified on a mobile device.
+---
 
-## Your Next Task (Phase 4b - Autocomplete)
-The next goal is to implement **Autocomplete Injection**.
-Currently, the IDE can detect errors, but we need it to suggest code.
+## Current State (June 2026 — Phase 5 Complete)
 
-**What you need to build:**
-1. **Send Autocomplete Requests:** Modify the editor's text change listener to send `textDocument/completion` JSON-RPC requests to the active `LspClient` when the user types (especially after typing `<` or `.`).
-2. **Handle Responses:** Parse the completion items returned by the language server.
-3. **UI Integration:** Display these completion items in a floating dropdown box (or a bottom sheet) in the Compose UI.
-4. **Injection:** When the user taps a suggestion, inject that text directly into the `CodeEditor`'s `TextFieldValue` at the cursor position.
+| Feature | Status |
+|---------|--------|
+| Terminal (PTY) | ✅ Complete |
+| Git / GitHub OAuth | ✅ Complete |
+| Node.js + npm | ✅ Complete |
+| Python 3.13 runtime | ✅ Complete |
+| Next.js / React / Vite | ✅ Complete |
+| Built-in browser + DevTools | ✅ Complete |
+| Port forwarding | ✅ Complete |
+| Source control UI | ✅ Complete |
+| Extension marketplace | ✅ Complete |
+| LSP (HTML/CSS/JS/TS/Bash) | ✅ Complete |
+| Python LSP (`pylsp`) | ✅ Complete |
+| **C/C++ LSP (`clangd` 21.1.8)** | ✅ Complete |
+| AI Agent (Gemini) | ✅ Complete |
+| React Native | ❌ Not started |
+| Flutter | ❌ Not started |
+
+---
+
+## C/C++ Toolchain — Important Notes
+
+The C/C++ toolchain is installed on-demand when the user first opens a `.c` or `.cpp` file.
+
+**Key implementation details:**
+
+1. **Download**: ~120–150 MB of Termux `.deb` packages from `packages-cf.termux.dev`.
+2. **XZ decompression**: Android's system `tar` supports `-J` but requires the `xz` binary in PATH — which is NOT present on stock Android. The installer uses `org.tukaani:xz` (`XZInputStream`) to decompress in pure Java, then calls `tar -xf` (no `-J` flag).
+3. **Symlinks**: Termux packages contain symlinks (e.g. `windres → llvm-windres`). `copyDirContents()` uses `java.nio.file.Files.isSymbolicLink()` + `Files.createSymbolicLink()` — NOT `File.copyTo()` — to handle these.
+4. **Verification skip**: `clangd` is a Termux/Bionic binary that cannot self-execute in the Android sandbox. `BinaryManager.markToolInstalled()` is used to bypass the version check.
+5. **Concurrency guard**: `isInstallingCpp` (synchronized) prevents duplicate download coroutines if the user switches between `.cpp` files during install.
+
+**Install path**: `filesDir/versions/clang/21.1.8/usr/bin/clangd`
+
+---
 
 ## Key Files to Review
-- `app/src/main/kotlin/com.kodrix.zohaib/viewmodel/TerminalViewModel.kt` (LSP Lifecycle and state)
-- `app/src/main/kotlin/com.kodrix.zohaib/lsp/LspClient.kt` (JSON-RPC communication bridge)
 
-You are authorized to execute terminal commands to build (`.\gradlew.bat assembleDebug`) and push the APK to the attached ADB device to test your changes. 
+| File | Purpose |
+|------|---------|
+| `viewmodel/TerminalViewModel.kt` | LSP lifecycle, process launch, C++ toolchain install, Python pylsp install |
+| `bridge/BinaryManager.kt` | Binary download/extract/versioning, notification progress, wrapper scripts |
+| `lsp/LspClient.kt` | JSON-RPC STDIO communication bridge |
+| `lsp/LspTypes.kt` | LSP protocol data classes |
+| `ui/IDEView.kt` | Editor UI, autocomplete dropdown rendering |
+| `app/build.gradle.kts` | Gradle dependencies (`org.tukaani:xz:1.10` added for C++ install) |
+
+---
+
+## Build & Deploy
+
+```bash
+# Build
+./gradlew assembleDebug
+
+# Install (replace with your device serial)
+adb -s <DEVICE> install -r app/build/outputs/apk/debug/app-x86_64-debug.apk
+
+# Monitor logs
+adb -s <DEVICE> logcat | grep -E "Kodrix|LspClient|CppInstall"
+```
+
+---
+
+## Next Tasks
+
+1. Verify `clangd` autocomplete end-to-end after toolchain install completes on real hardware.
+2. Add `compile_commands.json` generation so `clangd` resolves project-specific include paths.
+3. React Native support.
+4. Flutter support.
 
 Good luck!

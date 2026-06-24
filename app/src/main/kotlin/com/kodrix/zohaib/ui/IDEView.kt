@@ -109,6 +109,8 @@ fun IDEView(viewModel: TerminalViewModel) {
                             color = Color(0xFF8B949E), fontSize = (11 * uiScale).sp,
                             fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold
                         )
+                        Spacer(modifier = Modifier.weight(1f))
+                        NotificationBellButton(viewModel)
                     }
                     val activeExtensionDetail by viewModel.activeExtensionDetail.collectAsState()
                     val activeGithubExtensionDetail by viewModel.activeGithubExtensionDetail.collectAsState()
@@ -2016,4 +2018,182 @@ fun NpmPackageItem(pkg: com.kodrix.zohaib.viewmodel.NpmPackage, uiScale: Float, 
         }
     }
     HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), color = Color(0xFF30363D).copy(alpha = 0.5f))
+}
+
+@Composable
+fun NotificationBellButton(viewModel: TerminalViewModel) {
+    val notifications by viewModel.binaryManager.notificationsList.collectAsState()
+    var expanded by remember { mutableStateOf(false) }
+    val hasOngoing = notifications.any { it.isOngoing }
+    val uiScale by viewModel.uiScale.collectAsState()
+
+    Box(modifier = Modifier.wrapContentSize(Alignment.TopEnd)) {
+        Box(modifier = Modifier.wrapContentSize()) {
+            IconButton(
+                onClick = { expanded = !expanded },
+                modifier = Modifier.size((28 * uiScale).dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Notifications,
+                    contentDescription = "Notifications",
+                    tint = if (hasOngoing) Color(0xFF58A6FF) else Color(0xFF8B949E),
+                    modifier = Modifier.size((18 * uiScale).dp)
+                )
+            }
+            if (hasOngoing || notifications.isNotEmpty()) {
+                Box(
+                    modifier = Modifier
+                        .size((8 * uiScale).dp)
+                        .background(
+                            color = if (hasOngoing) Color(0xFF238636) else Color(0xFFD29922),
+                            shape = RoundedCornerShape(50)
+                        )
+                        .align(Alignment.TopEnd)
+                        .offset(x = (-2 * uiScale).dp, y = (2 * uiScale).dp)
+                )
+            }
+        }
+
+        DropdownMenu(
+            expanded = expanded,
+            onDismissRequest = { expanded = false },
+            modifier = Modifier
+                .background(Color(0xFF161B22))
+                .width((300 * uiScale).dp)
+                .border(1.dp, Color(0xFF30363D), RoundedCornerShape(8.dp))
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 12.dp, vertical = 8.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "Installer Logs",
+                    color = Color.White,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = (13 * uiScale).sp
+                )
+                if (notifications.isNotEmpty()) {
+                    Text(
+                        text = "Clear All",
+                        color = Color(0xFF58A6FF),
+                        fontSize = (11 * uiScale).sp,
+                        fontWeight = FontWeight.SemiBold,
+                        modifier = Modifier.clickable {
+                            viewModel.binaryManager.clearNotifications()
+                        }
+                    )
+                }
+            }
+
+            HorizontalDivider(color = Color(0xFF30363D))
+
+            if (notifications.isEmpty()) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 20.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = "No notifications",
+                        color = Color.Gray,
+                        fontSize = (12 * uiScale).sp
+                    )
+                }
+            } else {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(max = (250 * uiScale).dp)
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .verticalScroll(rememberScrollState())
+                    ) {
+                        notifications.forEach { notif ->
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 12.dp, vertical = 8.dp)
+                            ) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Icon(
+                                        imageVector = if (notif.isOngoing) {
+                                            Icons.Default.Download
+                                        } else if (notif.title.contains("Failed", ignoreCase = true)) {
+                                            Icons.Default.Error
+                                        } else {
+                                            Icons.Default.CheckCircle
+                                        },
+                                        contentDescription = null,
+                                        tint = if (notif.isOngoing) {
+                                            Color(0xFF58A6FF)
+                                        } else if (notif.title.contains("Failed", ignoreCase = true)) {
+                                            Color(0xFFF85149)
+                                        } else {
+                                            Color(0xFF3FB950)
+                                        },
+                                        modifier = Modifier.size((14 * uiScale).dp)
+                                    )
+                                    Spacer(Modifier.width(8.dp))
+                                    Text(
+                                        text = notif.title,
+                                        color = Color.White,
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = (12 * uiScale).sp,
+                                        maxLines = 1,
+                                        overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                }
+                                Spacer(Modifier.height(4.dp))
+                                Text(
+                                    text = notif.text,
+                                    color = Color.LightGray,
+                                    fontSize = (11 * uiScale).sp,
+                                    modifier = Modifier.padding(start = (22 * uiScale).dp)
+                                )
+
+                                if (notif.isOngoing && notif.progress != null) {
+                                    Spacer(Modifier.height(6.dp))
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(start = (22 * uiScale).dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        LinearProgressIndicator(
+                                            progress = { notif.progress ?: 0f },
+                                            color = Color(0xFF58A6FF),
+                                            trackColor = Color(0xFF30363D),
+                                            modifier = Modifier
+                                                .weight(1f)
+                                                .height((4 * uiScale).dp)
+                                                .clip(RoundedCornerShape(2.dp))
+                                        )
+                                        Spacer(Modifier.width(8.dp))
+                                        Text(
+                                            text = "${(notif.progress * 100).toInt()}%",
+                                            color = Color.Gray,
+                                            fontSize = (10 * uiScale).sp,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                    }
+                                }
+                                Spacer(Modifier.height(8.dp))
+                                HorizontalDivider(color = Color(0xFF30363D).copy(alpha = 0.5f))
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
 }

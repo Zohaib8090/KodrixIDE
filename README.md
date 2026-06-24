@@ -51,6 +51,8 @@ Clone a repo, install npm packages, interpret Python scripts, compile low-level 
 - **Multi-file Tabs** — Open multiple files simultaneously with unsaved change indicators
 - **Split Screen** — View and edit files side by side horizontally or vertically
 - **LSP Autocomplete** — Full Language Server Protocol integration providing intelligent code suggestions, diagnostics, and hover information natively
+- **Python LSP (`pylsp`)** — Zero-config background installer; provides auto-completion, hover docs, and diagnostics for Python files
+- **C/C++ LSP (`clangd`)** — On-demand Clang 21 toolchain download with `clangd` providing C/C++ completions and diagnostics
 - **Syntax Highlighting** — Native color token parsing for C, C++, Python, Kotlin, JavaScript, TypeScript, HTML, CSS, Markdown and more
 - **Smart Keyboard** — Extra keys row (ESC, TAB, arrows, CTRL) that sits above the soft keyboard
 - **Font & UI Scale** — Adjustable font size and global UI scale for accessibility
@@ -74,7 +76,8 @@ Clone a repo, install npm packages, interpret Python scripts, compile low-level 
 
 ### Runtimes & Toolchains
 - **Node.js v25** — Full Node.js running on-device as native binary with full **npm** support
-- **Python 3** — Fully standalone, isolated local Python execution layer built right into the app
+- **Python 3.13** — Fully standalone, isolated local Python execution layer built right into the app
+- **Clang 21.1.8** — Full C/C++ toolchain auto-downloaded on first C/C++ file open; packages sourced from Termux repositories and extracted natively (pure-Java XZ decompression — no `xz` system binary required)
 - **Auto Binary Updates** — Runtimes and Git binaries update automatically via GitHub releases
 
 ### Browser & DevTools
@@ -120,13 +123,13 @@ Clone a repo, install npm packages, interpret Python scripts, compile low-level 
 
 | Target | Status | Notes |
 |--------|--------|-------|
-| Python 3 | ✅ Working | Full runtime environment support |
+| Python 3 | ✅ Working | Full runtime + `pylsp` autocomplete |
 | React + Vite | ✅ Working | Use `@vitejs/plugin-react` (not swc variant) |
 | Express / Node.js | ✅ Working | Full support |
 | Vue + Vite | ✅ Working | Pure JS build |
 | Svelte + Vite | ✅ Working | Pure JS build |
 | Next.js | ✅ Working | Webpack mode, no Turbopack |
-| C / C++ | 🛠️ In Progress | Native standalone toolchain mapping |
+| C / C++ | ✅ Working | On-demand Clang 21 toolchain + `clangd` LSP |
 
 ---
 
@@ -142,12 +145,15 @@ Kodrix
 ├── Terminal Engine (termux-terminal-emulator)
 │   └── Full VT100/xterm emulation
 ├── Intelligence & AI Layer
-│   ├── Native LSP Engine (Language Server Client configs)
+│   ├── Native LSP Engine
+│   │   ├── Python → pylsp (auto-installed via pip)
+│   │   ├── C/C++ → clangd 21.1.8 (Termux .deb, pure-Java XZ extract)
+│   │   └── JS/TS/HTML/CSS/JSON/Bash → Node.js language servers
 │   └── Multi-Agent Loop Core (Gemini SDK runtime integration)
 ├── Bundled Binaries & Toolchains (jniLibs/)
 │   ├── Multi-Architecture Native Support (arm64-v8a, armeabi-v7a, x86, x86_64)
 │   ├── libnode.so (Node.js v25 runtime)
-│   ├── python3 (Native Python interpreter execution binary)
+│   ├── python3 (Native Python 3.13 interpreter)
 │   ├── libgit2.so (Git operations)
 │   ├── libnext_swc.so (SWC compiler for Next.js)
 │   ├── libcurl.so (HTTP/HTTPS)
@@ -200,9 +206,9 @@ cd KodrixIDE
 - [x] Run & Debug panel
 - [x] Native Python 3 execution runtime
 - [x] Multi-Architecture binary build profiles
-- [x] LSP autocomplete implementation (language packs framework)
+- [x] LSP autocomplete (Python `pylsp`, JS/TS, HTML, CSS, JSON, Bash)
 - [x] Integrated AI Agent loop (Gemini interface layer)
-- [ ] Native C/C++ cross-compiler toolchain integration (Clang/GCC)
+- [x] Native C/C++ cross-compiler toolchain (Clang 21 + clangd LSP)
 - [ ] React Native support
 - [ ] Flutter support
 
@@ -226,12 +232,13 @@ Open an issue on GitHub with steps to reproduce.
 ## Acknowledgements
 
 - [libgit2](https://libgit2.org/) — Git operations
-- [Termux](https://termux.dev/) — Terminal emulator library
+- [Termux](https://termux.dev/) — Terminal emulator library & Clang/clangd packages
 - [Node.js](https://nodejs.org/) — JavaScript runtime
 - [Python](https://www.python.org/) — Python interpreter backend
 - [Google Gemini](https://deepmind.google/technologies/gemini/) — AI Agent infrastructure
 - [bore](https://github.com/ekzhang/bore) — Port forwarding
 - [Open VSX](https://open-vsx.org/) — Extension marketplace
+- [XZ for Java](https://tukaani.org/xz/java.html) — Pure-Java XZ decompression for Clang toolchain install
 
 ---
 

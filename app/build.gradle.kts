@@ -116,6 +116,9 @@ dependencies {
     // Gson for LSP JSON-RPC serialization
     implementation("com.google.code.gson:gson:2.10.1")
 
+    // XZ decompression for C++ toolchain installation (.deb/data.tar.xz files)
+    implementation("org.tukaani:xz:1.10")
+
     // Firebase
     implementation(platform("com.google.firebase:firebase-bom:34.13.0"))
     implementation("com.google.firebase:firebase-analytics")

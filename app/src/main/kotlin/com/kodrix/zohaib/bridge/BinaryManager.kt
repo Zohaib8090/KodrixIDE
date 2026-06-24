@@ -56,6 +56,34 @@ class BinaryManager(private val context: Context) {
     private val _installStates = MutableStateFlow<Map<String, InstallState>>(emptyMap())
     val installStates = _installStates.asStateFlow()
 
+    data class AppNotification(
+        val id: String,
+        val title: String,
+        val text: String,
+        val progress: Float?,
+        val isOngoing: Boolean,
+        val timestamp: Long = System.currentTimeMillis()
+    )
+
+    private val _notificationsList = MutableStateFlow<List<AppNotification>>(emptyList())
+    val notificationsList = _notificationsList.asStateFlow()
+
+    fun updateAppNotification(id: String, title: String, text: String, progress: Float?, isOngoing: Boolean) {
+        val list = _notificationsList.value.toMutableList()
+        val index = list.indexOfFirst { it.id == id }
+        val updated = AppNotification(id, title, text, progress, isOngoing)
+        if (index != -1) {
+            list[index] = updated
+        } else {
+            list.add(0, updated)
+        }
+        _notificationsList.value = list
+    }
+
+    fun clearNotifications() {
+        _notificationsList.value = emptyList()
+    }
+
     private val masterKey = MasterKey.Builder(context)
         .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
         .build()
@@ -275,16 +303,12 @@ class BinaryManager(private val context: Context) {
                     val ver    = obj.getString("version")
                     val tag    = obj.getString("tag")
                     val status = obj.optString("status", "available")
-                    val note   = obj.optString("note", "")
 
                     // Skip if this is the bundled version already added above
                     if (bundled != null && ver == bundled.first) continue
 
-                    if (status == "unavailable") {
-                        list.add(RemoteVersion(tool = toolName, version = ver, tag = tag,
-                            downloadUrl = "", isUnavailable = true, note = note))
-                        continue
-                    }
+                    // Skip unavailable versions — don't show them in the UI
+                    if (status == "unavailable") continue
 
                     // Resolve download URL: prefer ABI-specific, fall back to universal
                     val url = obj.optString(abi, "").ifEmpty { obj.optString("universal", "") }
@@ -350,6 +374,19 @@ class BinaryManager(private val context: Context) {
         val stored = prefs.getString("active_$tool", null) ?: return null
         val bundledVer = BUNDLED_DEFAULTS[tool]?.first
         return if (stored == bundledVer) null else stored
+    }
+
+    /**
+     * Marks [tool] as having [version] installed and active WITHOUT running the
+     * binary for verification. Use this for cross-compiled tools (e.g. Clang)
+     * that cannot self-execute inside the Android app sandbox.
+     */
+    fun markToolInstalled(tool: String, version: String) {
+        prefs.edit().putString("active_$tool", version).apply()
+        syncActiveVersionToFile(tool, version)
+        updateActiveUI(tool, version)
+        rebuildWrappers()
+        Log.i(TAG, "[$tool] Marked installed at $version (no verification)")
     }
 
     suspend fun setActiveVersion(tool: String, version: String): Boolean {
@@ -600,7 +637,7 @@ class BinaryManager(private val context: Context) {
         }
     }
 
-    private fun showProgressNotification(tool: String, version: String, stage: String, progress: Float) {
+    fun showProgressNotification(tool: String, version: String, stage: String, progress: Float) {
         ensureChannel()
         val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         val pct = (progress * 100).toInt()
@@ -618,13 +655,21 @@ class BinaryManager(private val context: Context) {
         if (stage == "downloading") builder.setProgress(100, pct, false)
         else builder.setProgress(100, 0, true)
         nm.notify(2002, builder.build())
+
+        updateAppNotification(
+            id = "${tool}_$version",
+            title = "Installing ${tool.uppercase()} $version",
+            text = text,
+            progress = progress,
+            isOngoing = true
+        )
     }
 
-    private fun cancelProgressNotification() {
+    fun cancelProgressNotification() {
         (context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager).cancel(2002)
     }
 
-    private fun showCompletionNotification(tool: String, version: String, success: Boolean, error: String? = null) {
+    fun showCompletionNotification(tool: String, version: String, success: Boolean, error: String? = null) {
         ensureChannel()
         val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         val builder = NotificationCompat.Builder(context, "kodrix_runtime_download")
@@ -633,6 +678,14 @@ class BinaryManager(private val context: Context) {
             .setSmallIcon(if (success) android.R.drawable.stat_sys_download_done else android.R.drawable.stat_notify_error)
             .setAutoCancel(true)
         nm.notify(2003, builder.build())
+
+        updateAppNotification(
+            id = "${tool}_$version",
+            title = if (success) "${tool.uppercase()} Installed" else "${tool.uppercase()} Installation Failed",
+            text = if (success) "Version $version is ready to use!" else "Failed: ${error ?: "Unknown error"}",
+            progress = null,
+            isOngoing = false
+        )
     }
 
     fun restartApp() {
@@ -650,7 +703,7 @@ class BinaryManager(private val context: Context) {
       "node": {
         "displayName": "Node.js Runtime",
         "category": "Runtime",
-        "iconUrl": "",
+        "iconUrl": "https://raw.githubusercontent.com/Zohaib8090/KodrixMarketplace/main/icons/node.png",
         "versions": [
           {
             "version": "26.2.0",
@@ -669,16 +722,13 @@ class BinaryManager(private val context: Context) {
             "armeabi-v7a": "https://github.com/Zohaib8090/KodrixMarketplace/raw/main/node-lts-arm32.zip",
             "x86_64": "https://github.com/Zohaib8090/KodrixMarketplace/raw/main/node-lts-x86_64.zip",
             "x86": "https://github.com/Zohaib8090/KodrixMarketplace/raw/main/node-lts-x86.zip"
-          },
-          { "version": "22.x (Jod)", "tag": "v22 LTS — Jod", "status": "unavailable", "note": "No Android/Bionic binary available." },
-          { "version": "20.x (Iron)", "tag": "v20 LTS — Iron", "status": "unavailable", "note": "No Android/Bionic binary available." },
-          { "version": "18.x (Hydrogen)", "tag": "v18 LTS — Hydrogen", "status": "unavailable", "note": "No Android/Bionic binary available." }
+          }
         ]
       },
       "git": {
         "displayName": "Git Version Control",
         "category": "Tools",
-        "iconUrl": "",
+        "iconUrl": "https://raw.githubusercontent.com/Zohaib8090/KodrixMarketplace/main/icons/git.png",
         "versions": [
           { "version": "2.34.0", "tag": "v2.34.0 (Bundled)", "status": "available", "universal": "https://github.com/Zohaib8090/KodrixMarketplace/raw/main/git-universal.zip" }
         ]
@@ -686,7 +736,7 @@ class BinaryManager(private val context: Context) {
       "python": {
         "displayName": "Python Runtime",
         "category": "Runtime",
-        "iconUrl": "",
+        "iconUrl": "https://raw.githubusercontent.com/Zohaib8090/KodrixMarketplace/main/icons/python.png",
         "versions": [
           {
             "version": "3.13.13",

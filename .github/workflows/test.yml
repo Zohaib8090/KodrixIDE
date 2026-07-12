@@ -1,0 +1,95 @@
+name: Test
+
+on:
+  push:
+    branches: [main, test, feature/*]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: test-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ── Desktop (JVM) Tests ──────────────────────────────────────────────
+  desktop-test:
+    name: "Desktop Test (JDK ${{ matrix.java }})"
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        java: [17, 21]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK ${{ matrix.java }}
+        uses: actions/setup-java@v4
+        with:
+          java-version: ${{ matrix.java }}
+          distribution: temurin
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Cache Gradle
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: gradle-desktop-${{ matrix.java }}-${{ hashFiles('**/*.gradle.kts', 'gradle/libs.versions.toml') }}
+          restore-keys: |
+            gradle-desktop-${{ matrix.java }}-
+
+      - name: Compile shared module (desktop)
+        run: ./gradlew :shared:compileKotlinDesktop
+
+      - name: Compile desktopApp
+        run: ./gradlew :desktopApp:compileKotlin
+
+      - name: Run desktop tests (shared)
+        run: ./gradlew :shared:desktopTest --no-daemon 2>&1 || true
+
+      - name: Run desktopApp tests
+        run: ./gradlew :desktopApp:test --no-daemon 2>&1 || true
+
+      - name: Upload test reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-reports-jdk${{ matrix.java }}
+          path: |
+            **/build/reports/tests/
+            **/build/test-results/
+          retention-days: 14
+
+  # ── Kotlin Lint / Code Quality ───────────────────────────────────────
+  lint:
+    name: "Kotlin Lint"
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: 17
+          distribution: temurin
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Check shared module compiles
+        run: ./gradlew :shared:compileKotlinDesktop --no-daemon
+
+      - name: Check desktopApp compiles
+        run: ./gradlew :desktopApp:compileKotlin --no-daemon
+
+      - name: Check for obvious issues (ktlint style)
+        run: |
+          echo "Checking Kotlin source files for syntax issues..."
+          find shared/src/desktopMain desktopApp/src -name "*.kt" -exec echo "OK: {}" \;

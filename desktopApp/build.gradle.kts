@@ -37,14 +37,23 @@ compose.desktop {
         }
 
         nativeDistributions {
-            targetFormats(TargetFormat.Deb, TargetFormat.Rpm, TargetFormat.AppImage)
+            targetFormats(TargetFormat.Dmg, TargetFormat.Deb, TargetFormat.Rpm, TargetFormat.AppImage)
             packageName = "kodrix-ide"
             packageVersion = "1.2.0"
-            description = "Kodrix IDE for Linux"
+            description = "Kodrix IDE — A Kotlin Multiplatform IDE"
             vendor = "Kodrix"
+            copyright = "© 2025 Kodrix"
 
             linux {
                 iconFile.set(project.file("icon.png"))
+                menuGroup = "Development"
+                rpmLicenseType = "MIT"
+            }
+
+            macOS {
+                iconFile.set(project.file("icon.png"))
+                bundleID = "com.kodrix.zohaib.desktop"
+                appCategory = "public.app-category.developer-tools"
             }
         }
     }

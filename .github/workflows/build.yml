@@ -103,3 +103,50 @@ jobs:
           name: macos-dmg
           path: dist/
           retention-days: 30
+
+  # ── Windows: MSI + Exe ────────────────────────────────────────────────
+  build-windows:
+    name: "Windows (MSI + Exe)"
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: false
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: 17
+          distribution: temurin
+
+      - name: Setup Android SDK & accept licences
+        uses: android-actions/setup-android@v3
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Build MSI
+        run: ./gradlew :desktopApp:packageMsi --no-daemon
+        shell: bash
+
+      - name: Build Exe
+        run: ./gradlew :desktopApp:packageExe --no-daemon
+        shell: bash
+
+      - name: Collect artifacts
+        run: |
+          mkdir -p dist
+          find desktopApp/build/compose/binaries/main -type f \
+            \( -name "*.msi" -o -name "*.exe" \) \
+            -exec cp {} dist/ \;
+          ls -lh dist/
+        shell: bash
+
+      - name: Upload Windows packages
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-packages
+          path: dist/
+          retention-days: 30

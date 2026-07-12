@@ -23,6 +23,14 @@ jobs:
         with:
           ref: ${{ github.event.pull_request.head.sha }}
           fetch-depth: 0
+      - name: 'Clean up orphaned submodules'
+        run: |
+          if [ -f .gitmodules ]; then
+            git config --file .gitmodules --name-only --get-regexp path | while read entry; do
+              git rm "$entry" --cached --force || true
+            done
+          fi
+        continue-on-error: true
       - name: 'Qodana Scan'
         uses: JetBrains/qodana-action@v2026.1
         env:

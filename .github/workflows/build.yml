@@ -14,8 +14,16 @@ concurrency:
 jobs:
   # ── Linux: DEB, RPM, AppImage ────────────────────────────────────────
   build-linux:
-    name: "Linux (DEB + RPM + AppImage)"
-    runs-on: ubuntu-22.04
+    name: "Linux ${{ matrix.arch }} (DEB + RPM + AppImage)"
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x86_64
+            runner: ubuntu-22.04
+          - arch: aarch64
+            runner: ubuntu-24.04-arm
 
     steps:
       - name: Checkout
@@ -44,6 +52,7 @@ jobs:
         run: ./gradlew :desktopApp:packageDeb --no-daemon
 
       - name: Build RPM
+        if: matrix.arch == 'x86_64'
         run: ./gradlew :desktopApp:packageRpm --no-daemon
 
       - name: Build AppImage
@@ -60,14 +69,22 @@ jobs:
       - name: Upload Linux packages
         uses: actions/upload-artifact@v4
         with:
-          name: linux-packages
+          name: linux-packages-${{ matrix.arch }}
           path: dist/
           retention-days: 30
 
   # ── macOS: DMG ────────────────────────────────────────────────────────
   build-macos:
-    name: "macOS (DMG)"
-    runs-on: macos-latest
+    name: "macOS ${{ matrix.arch }} (DMG)"
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: arm64
+            runner: macos-latest
+          - arch: x86_64
+            runner: macos-13
 
     steps:
       - name: Checkout
@@ -100,7 +117,7 @@ jobs:
       - name: Upload macOS DMG
         uses: actions/upload-artifact@v4
         with:
-          name: macos-dmg
+          name: macos-dmg-${{ matrix.arch }}
           path: dist/
           retention-days: 30
 

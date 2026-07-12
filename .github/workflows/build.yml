@@ -80,8 +80,19 @@ jobs:
           java-version: 17
           distribution: temurin
 
-      - name: Setup Android SDK & accept licences
+      - name: Setup Android SDK (x86_64 only)
+        if: matrix.arch == 'x86_64'
         uses: android-actions/setup-android@v3
+
+      - name: Setup Android SDK (ARM workaround)
+        if: matrix.arch == 'aarch64'
+        run: |
+          mkdir -p $ANDROID_SDK_ROOT/cmdline-tools
+          wget -q https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip -O /tmp/cmdline-tools.zip
+          unzip -q /tmp/cmdline-tools.zip -d $ANDROID_SDK_ROOT/cmdline-tools
+          mv $ANDROID_SDK_ROOT/cmdline-tools/cmdline-tools $ANDROID_SDK_ROOT/cmdline-tools/latest
+          yes | $ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager --licenses > /dev/null 2>&1 || true
+          $ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager "platforms;android-34" "build-tools;34.0.0"
 
       - name: Install packaging dependencies
         run: |

@@ -20,24 +20,30 @@ dependencies {
     implementation("org.jetbrains.pty4j:pty4j:0.12.35")
 }
 
+val currentOs = System.getProperty("os.name").lowercase()
+val appTargetFormats = when {
+    currentOs.contains("mac") || currentOs.contains("darwin") -> listOf(TargetFormat.Dmg)
+    currentOs.contains("win") -> listOf(TargetFormat.Msi, TargetFormat.Exe)
+    else -> listOf(TargetFormat.Deb, TargetFormat.Rpm, TargetFormat.AppImage)
+}
+
 compose.desktop {
     application {
         mainClass = "com.kodrix.zohaib.desktop.MainKt"
         jvmArgs += listOf(
             "-Xmx4g",
-            "-Xms128m",                         // start lean; JVM grows on demand
+            "-Xms128m",
             "-XX:+UseG1GC",
             "-XX:MaxGCPauseMillis=200",
-            "-XX:+UseStringDeduplication"       // de-duplicate identical Strings in heap
+            "-XX:+UseStringDeduplication"
         )
 
-        // Ensure DISPLAY env is available for the run task
         tasks.withType<JavaExec> {
             environment("DISPLAY", System.getenv("DISPLAY") ?: ":99")
         }
 
         nativeDistributions {
-            targetFormats(TargetFormat.Dmg, TargetFormat.Deb, TargetFormat.Rpm, TargetFormat.AppImage)
+            targetFormats(*appTargetFormats.toTypedArray())
             packageName = "kodrix-ide"
             packageVersion = "1.2.0"
             description = "Kodrix IDE — A Kotlin Multiplatform IDE"

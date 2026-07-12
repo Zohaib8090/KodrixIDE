@@ -2,7 +2,7 @@ name: Test
 
 on:
   push:
-    branches: [main, test, feature/*]
+    branches: [test, main, feature/*]
   pull_request:
     branches: [main]
 
@@ -23,6 +23,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          submodules: false
 
       - name: Set up JDK ${{ matrix.java }}
         uses: actions/setup-java@v4
@@ -33,26 +35,16 @@ jobs:
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v4
 
-      - name: Cache Gradle
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.gradle/caches
-            ~/.gradle/wrapper
-          key: gradle-desktop-${{ matrix.java }}-${{ hashFiles('**/*.gradle.kts', 'gradle/libs.versions.toml') }}
-          restore-keys: |
-            gradle-desktop-${{ matrix.java }}-
-
       - name: Compile shared module (desktop)
-        run: ./gradlew :shared:compileKotlinDesktop
+        run: ./gradlew :shared:compileKotlinDesktop --no-daemon
 
       - name: Compile desktopApp
-        run: ./gradlew :desktopApp:compileKotlin
+        run: ./gradlew :desktopApp:compileKotlin --no-daemon
 
-      - name: Run desktop tests (shared)
+      - name: Run tests (shared)
         run: ./gradlew :shared:desktopTest --no-daemon 2>&1 || true
 
-      - name: Run desktopApp tests
+      - name: Run tests (desktopApp)
         run: ./gradlew :desktopApp:test --no-daemon 2>&1 || true
 
       - name: Upload test reports
@@ -65,14 +57,16 @@ jobs:
             **/build/test-results/
           retention-days: 14
 
-  # ── Kotlin Lint / Code Quality ───────────────────────────────────────
+  # ── Lint ─────────────────────────────────────────────────────────────
   lint:
-    name: "Kotlin Lint"
+    name: "Lint Check"
     runs-on: ubuntu-latest
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          submodules: false
 
       - name: Set up JDK 17
         uses: actions/setup-java@v4
@@ -83,13 +77,8 @@ jobs:
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v4
 
-      - name: Check shared module compiles
+      - name: Compile shared (desktop)
         run: ./gradlew :shared:compileKotlinDesktop --no-daemon
 
-      - name: Check desktopApp compiles
+      - name: Compile desktopApp
         run: ./gradlew :desktopApp:compileKotlin --no-daemon
-
-      - name: Check for obvious issues (ktlint style)
-        run: |
-          echo "Checking Kotlin source files for syntax issues..."
-          find shared/src/desktopMain desktopApp/src -name "*.kt" -exec echo "OK: {}" \;

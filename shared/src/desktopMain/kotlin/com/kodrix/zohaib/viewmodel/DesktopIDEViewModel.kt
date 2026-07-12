@@ -1,5 +1,6 @@
 package com.kodrix.zohaib.viewmodel
 
+import com.kodrix.zohaib.ai.DesktopAIBackendManager
 import com.kodrix.zohaib.platform.*
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -11,6 +12,9 @@ class DesktopIDEViewModel : BaseIDEViewModel() {
     private val homeDir = System.getProperty("user.home") ?: "/"
     private val projectsDir = File(homeDir, "KodrixProjects").apply { mkdirs() }
     private var currentProjectDir: File? = null
+
+    /** Desktop AI backend — uses Gemini API directly via HTTP (no WebView) */
+    val aiBackend = DesktopAIBackendManager()
 
     init {
         refreshProjects()
@@ -663,9 +667,8 @@ class DesktopIDEViewModel : BaseIDEViewModel() {
         state.isAiThinking.value = true
 
         scope.launch {
-            // Simulate AI response for now
-            delay(500)
-            val response = "AI features will be available when Gemini API integration is configured. You said: $message"
+            // Use the real Gemini API backend
+            val response = aiBackend.ask(message)
             val updatedMessages = state.aiChatMessages.value.toMutableList()
             updatedMessages.add(ChatMessage("assistant", response))
             withContext(Dispatchers.Main) {

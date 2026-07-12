@@ -31,6 +31,11 @@ compose.desktop {
             "-XX:+UseStringDeduplication"       // de-duplicate identical Strings in heap
         )
 
+        // Ensure DISPLAY env is available for the run task
+        tasks.withType<JavaExec> {
+            environment("DISPLAY", System.getenv("DISPLAY") ?: ":99")
+        }
+
         nativeDistributions {
             targetFormats(TargetFormat.Deb, TargetFormat.Rpm, TargetFormat.AppImage)
             packageName = "kodrix-ide"

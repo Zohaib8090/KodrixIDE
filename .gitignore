@@ -76,3 +76,12 @@ CURRENT_TASK.md
 **/libbinding_minifier_node.so
 app/google-services.json
 next-swc-new.node
+
+# Agent & Credentials
+.agentcli/logs/
+.agentcli/sessions/
+.env
+.env.local
+*.pem
+*.key
+*.keystore

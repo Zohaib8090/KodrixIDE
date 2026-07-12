@@ -233,7 +233,7 @@ class DesktopIDEViewModel : BaseIDEViewModel() {
                         path = file.absolutePath,
                         name = file.name,
                         isDirectory = entry.isDir,
-                        isLoaded = !entry.isDir, // Files are loaded by default; directories are lazy-loaded
+                        isLoaded = !entry.isDir,
                         children = emptyList()
                     ))
                 }
@@ -483,14 +483,21 @@ class DesktopIDEViewModel : BaseIDEViewModel() {
     }
     // === GitHub OAuth ===
 
-    private val githubClientId     = "Ov23liGDwcWLayi70rk2"
-    private val githubClientSecret = "961d371f7bd737f4d3de71f13f6b9dfebfed118c"
+    // SECURITY: Credentials loaded from environment variables, not hardcoded
+    private fun getGithubClientId(): String = System.getenv("GITHUB_OAUTH_CLIENT_ID") ?: ""
+    private fun getGithubClientSecret(): String = System.getenv("GITHUB_OAUTH_CLIENT_SECRET") ?: ""
     private var oauthStateToken: String? = null
 
     override fun loginGithub() {
+        val clientId = getGithubClientId()
+        if (clientId.isEmpty()) {
+            state.gitStatusMessage.value = "GitHub OAuth not configured. Set GITHUB_OAUTH_CLIENT_ID environment variable."
+            return
+        }
+
         oauthStateToken = UUID.randomUUID().toString()
         val url = "https://github.com/login/oauth/authorize" +
-                "?client_id=$githubClientId" +
+                "?client_id=$clientId" +
                 "&scope=repo,user" +
                 "&redirect_uri=kodrix://github-auth" +
                 "&state=$oauthStateToken"
@@ -515,6 +522,14 @@ class DesktopIDEViewModel : BaseIDEViewModel() {
     fun handleOAuthCallback(url: String) {
         scope.launch(Dispatchers.IO) {
             try {
+                val clientSecret = getGithubClientSecret()
+                if (clientSecret.isEmpty()) {
+                    withContext(Dispatchers.Main) {
+                        state.gitStatusMessage.value = "GitHub OAuth secret not configured."
+                    }
+                    return@launch
+                }
+
                 // Parse: kodrix://github-auth?code=XXX&state=YYY
                 val query = url.substringAfter("?").substringBefore(" ")
                 val params = query.split("&").associate {
@@ -531,6 +546,7 @@ class DesktopIDEViewModel : BaseIDEViewModel() {
                 }
                 oauthStateToken = null
 
+                val clientId = getGithubClientId()
                 // Exchange code → access token
                 val tokenUrl  = java.net.URL("https://github.com/login/oauth/access_token")
                 val tokenConn = tokenUrl.openConnection() as java.net.HttpURLConnection
@@ -538,7 +554,7 @@ class DesktopIDEViewModel : BaseIDEViewModel() {
                 tokenConn.setRequestProperty("Accept", "application/json")
                 tokenConn.doOutput = true
                 tokenConn.outputStream.write(
-                    "client_id=$githubClientId&client_secret=$githubClientSecret&code=$code".toByteArray()
+                    "client_id=$clientId&client_secret=$clientSecret&code=$code".toByteArray()
                 )
                 val tokenResp = tokenConn.inputStream.bufferedReader().readText()
                 val token     = jsonStr(tokenResp, "access_token")
@@ -612,8 +628,8 @@ class DesktopIDEViewModel : BaseIDEViewModel() {
             val result = executeCommand(listOf("npm", "search", query, "--json"))
             try {
                 val json = result.stdout
-                val names = Regex("\"name\"\\s*:\\s*\"([^\"]+)\"").findAll(json).map { it.groupValues[1] }.take(20).toList()
-                val descs = Regex("\"description\"\\s*:\\s*\"([^\"]+)\"").findAll(json).map { it.groupValues[1] }.take(20).toList()
+                val names = Regex("\"name\"\\s*:\\s\"([^\"]+)\"").findAll(json).map { it.groupValues[1] }.take(20).toList()
+                val descs = Regex("\"description\"\\s*:\\s\"([^\"]+)\"").findAll(json).map { it.groupValues[1] }.take(20).toList()
                 val pkgs = names.mapIndexed { i, name ->
                     NpmPackage(name, "", descs.getOrElse(i) { "" }, "", "")
                 }
@@ -702,7 +718,7 @@ class DesktopIDEViewModel : BaseIDEViewModel() {
 
     /** Extracts a string value from a flat JSON payload without needing org.json. */
     private fun jsonStr(json: String, key: String): String =
-        Regex(""""${Regex.escape(key)}"\s*:\s*"([^"]*)"""").find(json)?.groupValues?.getOrElse(1) { "" } ?: ""
+        Regex("\"\"\"+Regex.escape(key)+"\"\\\\\"\"+\\s*:\\s*\"([^\"]*)\""").find(json)?.groupValues?.getOrElse(1) { "" } ?: ""
 }
 
 data class FileNode(

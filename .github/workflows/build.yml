@@ -1,4 +1,4 @@
-name: Build Desktop Packages
+name: Build Desktop DEB
 
 on:
   push:
@@ -18,9 +18,8 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  # ── Build on Linux (RPM, AppImage, Deb) ──────────────────────────────
-  build-linux:
-    name: "Linux Packages"
+  build-deb:
+    name: "Build DEB Package"
     runs-on: ubuntu-22.04
 
     steps:
@@ -33,15 +32,10 @@ jobs:
           java-version: 17
           distribution: temurin
 
-      - name: Install Linux packaging dependencies
+      - name: Install packaging dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y \
-            rpm \
-            dpkg-dev \
-            fakeroot \
-            libfuse2 \
-            file
+          sudo apt-get install -y dpkg-dev fakeroot file
 
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v4
@@ -52,95 +46,39 @@ jobs:
           path: |
             ~/.gradle/caches
             ~/.gradle/wrapper
-          key: gradle-linux-${{ hashFiles('**/*.gradle.kts', 'gradle/libs.versions.toml') }}
+          key: gradle-deb-${{ hashFiles('**/*.gradle.kts', 'gradle/libs.versions.toml') }}
           restore-keys: |
-            gradle-linux-
+            gradle-deb-
 
-      - name: Build RPM
-        run: ./gradlew :desktopApp:packageRpm --no-daemon
-
-      - name: Build AppImage
-        run: ./gradlew :desktopApp:packageAppImage --no-daemon
-
-      - name: Build Deb
+      - name: Build DEB
         run: ./gradlew :desktopApp:packageDeb --no-daemon
 
-      - name: Collect Linux artifacts
+      - name: Collect artifact
         run: |
           mkdir -p dist
-          find desktopApp/build/compose/binaries/main -type f \
-            \( -name "*.rpm" -o -name "*.AppImage" -o -name "*.deb" \) \
+          find desktopApp/build/compose/binaries/main -type f -name "*.deb" \
             -exec cp {} dist/ \;
           ls -lh dist/
 
-      - name: Upload Linux artifacts
+      - name: Upload DEB artifact
         uses: actions/upload-artifact@v4
         with:
-          name: linux-packages
+          name: deb-package
           path: dist/
           retention-days: 30
 
-  # ── Build on macOS (DMG) ─────────────────────────────────────────────
-  build-macos:
-    name: "macOS DMG"
-    runs-on: macos-latest
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Set up JDK 17
-        uses: actions/setup-java@v4
-        with:
-          java-version: 17
-          distribution: temurin
-
-      - name: Setup Gradle
-        uses: gradle/actions/setup-gradle@v4
-
-      - name: Cache Gradle
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.gradle/caches
-            ~/.gradle/wrapper
-            ~/.gradle/native
-          key: gradle-macos-${{ hashFiles('**/*.gradle.kts', 'gradle/libs.versions.toml') }}
-          restore-keys: |
-            gradle-macos-
-
-      - name: Build DMG
-        run: ./gradlew :desktopApp:packageDmg --no-daemon
-
-      - name: Collect macOS artifacts
-        run: |
-          mkdir -p dist
-          find desktopApp/build/compose/binaries/main -type f -name "*.dmg" \
-            -exec cp {} dist/ \;
-          ls -lh dist/
-
-      - name: Upload macOS artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: macos-dmg
-          path: dist/
-          retention-days: 30
-
-  # ── Release (optional) ───────────────────────────────────────────────
   release:
     name: "Create Release"
-    needs: [build-linux, build-macos]
+    needs: [build-deb]
     if: github.event.inputs.publish_release == 'true' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
 
     steps:
-      - name: Download all artifacts
+      - name: Download artifact
         uses: actions/download-artifact@v4
         with:
-          path: all-artifacts
-
-      - name: List artifacts
-        run: find all-artifacts -type f | sort
+          name: deb-package
+          path: dist
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
@@ -150,28 +88,12 @@ jobs:
           body: |
             ## Kodrix IDE v1.2.0
 
-            ### Downloads
-            - **Linux**: `.AppImage`, `.deb`, `.rpm`
-            - **macOS**: `.dmg`
-
             ### Install
             ```bash
-            # Linux (AppImage)
-            chmod +x Kodrix-IDE-1.2.0.AppImage
-            ./Kodrix-IDE-1.2.0.AppImage
-
-            # Linux (Deb)
             sudo dpkg -i kodrix-ide_1.2.0_amd64.deb
-
-            # Linux (RPM)
-            sudo rpm -i kodrix-ide-1.2.0.x86_64.rpm
-
-            # macOS
-            open Kodrix-IDE-1.2.0.dmg
             ```
           draft: false
           prerelease: true
-          files: |
-            all-artifacts/**/*
+          files: dist/*
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -29,6 +29,9 @@ jobs:
           java-version: 17
           distribution: temurin
 
+      - name: Setup Android SDK & accept licences
+        uses: android-actions/setup-android@v3
+
       - name: Install packaging dependencies
         run: |
           sudo apt-get update
@@ -77,6 +80,9 @@ jobs:
         with:
           java-version: 17
           distribution: temurin
+
+      - name: Setup Android SDK & accept licences
+        uses: android-actions/setup-android@v3
 
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v4

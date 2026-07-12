@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "1094821711019",
+    "project_id": "kodrixide",
+    "storage_bucket": "kodrixide.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:1094821711019:android:6b6df052f6c1484340bbee",
+        "android_client_info": {
+          "package_name": "com.kodrix.zohaib"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAlPQTXGHcBSMFyZcnNcqXoHSibe6A7kBo"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

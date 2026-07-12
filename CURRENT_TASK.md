@@ -1,5 +1,5 @@
 # Kodrix — Current Session & Task Status
-# Last Sync: 2026-06-25
+# Last Sync: 2026-06-26
 
 This file serves as a persistent record of the project's progress, ensuring context is preserved across AI sessions.
 
@@ -39,6 +39,7 @@ This file serves as a persistent record of the project's progress, ensuring cont
 **Phase 6 — Polish & Stability**
 
 ### Pending / Next Up
+- [x] Integrate JetBrains JediTerm + Pty4J in desktopApp using SwingPanel for native, high-performance local terminal emulation.
 - [ ] Verify `clangd` autocomplete end-to-end after toolchain extraction completes on real hardware.
 - [ ] Add `compile_commands.json` generation support so `clangd` resolves project-specific include paths.
 - [ ] React Native support.

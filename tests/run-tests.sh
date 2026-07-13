@@ -104,7 +104,7 @@ else
 fi
 
 # Check initialize request support
-if grep -q 'initialize' "$LSP_CLIENT" 2>/dev/null || grep -q 'initialize' "$PROJECT_ROOT/shared/src/commonMain/kotlin/com/kodrix/zohaib/lsp/LspTypes.kt" 2>/dev/null; then
+if grep -iq 'initialize' "$LSP_CLIENT" 2>/dev/null || grep -iq 'initialize' "$PROJECT_ROOT/shared/src/commonMain/kotlin/com/kodrix/zohaib/lsp/LspTypes.kt" 2>/dev/null; then
     pass "LSP InitializeParams defined"
 else
     fail "LSP InitializeParams missing"

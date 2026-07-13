@@ -126,13 +126,25 @@ jobs:
               echo "⚠️  No .AppImage found — creating manually with appimagetool"
               APP_DIR="desktopApp/build/compose/binaries/main/app/kodrix-ide"
               if [ -d "$APP_DIR" ]; then
-                  # Download appimagetool
-                  wget -q "https://github.com/AppImage/AppImageKit/releases/download/continuous/appimagetool-x86_64.AppImage" -O /tmp/appimagetool
-                  chmod +x /tmp/appimagetool
-                  # Create AppImage with --no-fuse (FUSE unavailable on CI runners)
+                  # Download appimagetool and extract it (it's itself an AppImage)
+                  curl -fSL --retry 3 "https://github.com/AppImage/AppImageKit/releases/download/continuous/appimagetool-x86_64.AppImage" -o /tmp/appimagetool.AppImage
+                  chmod +x /tmp/appimagetool.AppImage
+                  # Extract appimagetool since FUSE isn't available on CI
+                  /tmp/appimagetool.AppImage --appimage-extract 2>/dev/null || true
+                  if [ -x squashfs-root/AppRun ]; then
+                      AI_TOOL="./squashfs-root/AppRun"
+                  elif [ -x /tmp/appimagetool.AppImage ]; then
+                      # Try running directly (may work without FUSE for creation)
+                      AI_TOOL="/tmp/appimagetool.AppImage"
+                  else
+                      echo "❌ appimagetool not available"
+                      exit 1
+                  fi
                   ARCH=${{ matrix.arch == 'aarch64' && 'aarch64' || 'x86_64' }}
-                  /tmp/appimagetool --no-fuse --comp zstd "$APP_DIR" "dist/kodrix-ide-1.2.0-${ARCH}.AppImage"
-                  echo "✅ AppImage created with appimagetool"
+                  $AI_TOOL --no-fuse "$APP_DIR" "dist/kodrix-ide-1.2.0-${ARCH}.AppImage" 2>&1 || \
+                  $AI_TOOL "$APP_DIR" "dist/kodrix-ide-1.2.0-${ARCH}.AppImage" 2>&1
+                  echo "✅ AppImage created"
+                  ls -lh dist/
               else
                   echo "❌ App directory not found: $APP_DIR"
                   ls -R desktopApp/build/compose/binaries/main/ || true

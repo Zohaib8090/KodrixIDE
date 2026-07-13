@@ -639,9 +639,16 @@ jobs:
               echo "⚠️  Gradle didn't produce .AppImage — using appimagetool fallback"
               APP_DIR="desktopApp/build/compose/binaries/main/app/kodrix-ide"
               if [ -d "$APP_DIR" ]; then
-                  wget -q "https://github.com/AppImage/AppImageKit/releases/download/continuous/appimagetool-x86_64.AppImage" -O /tmp/appimagetool
-                  chmod +x /tmp/appimagetool
-                  /tmp/appimagetool --no-fuse --comp zstd "$APP_DIR" "desktopApp/build/compose/binaries/main/app/kodrix-ide-1.2.0-x86_64.AppImage"
+                  curl -fSL --retry 3 "https://github.com/AppImage/AppImageKit/releases/download/continuous/appimagetool-x86_64.AppImage" -o /tmp/appimagetool.AppImage
+                  chmod +x /tmp/appimagetool.AppImage
+                  /tmp/appimagetool.AppImage --appimage-extract 2>/dev/null || true
+                  if [ -x squashfs-root/AppRun ]; then
+                      ./squashfs-root/AppRun --no-fuse "$APP_DIR" "desktopApp/build/compose/binaries/main/app/kodrix-ide-1.2.0-x86_64.AppImage" 2>&1 || \
+                      ./squashfs-root/AppRun "$APP_DIR" "desktopApp/build/compose/binaries/main/app/kodrix-ide-1.2.0-x86_64.AppImage" 2>&1
+                  else
+                      /tmp/appimagetool.AppImage --no-fuse "$APP_DIR" "desktopApp/build/compose/binaries/main/app/kodrix-ide-1.2.0-x86_64.AppImage" 2>&1 || \
+                      /tmp/appimagetool.AppImage "$APP_DIR" "desktopApp/build/compose/binaries/main/app/kodrix-ide-1.2.0-x86_64.AppImage" 2>&1
+                  fi
                   echo "✅ AppImage created with appimagetool"
               else
                   echo "❌ App directory not found"

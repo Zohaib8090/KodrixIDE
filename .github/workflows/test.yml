@@ -705,6 +705,9 @@ jobs:
               exit 1
           fi
 
+          # Convert to absolute path before any cd
+          AI="$(cd "$(dirname "$AI")" && pwd)/$(basename "$AI")"
+
           echo " AppImage: $(basename "$AI")"
           AI_SIZE=$(stat -c%s "$AI")
           AI_SIZE_MB=$(( AI_SIZE / 1048576 ))

@@ -146,8 +146,9 @@ jobs:
                   else
                       printf '\x89PNG\r\n\x1a\n' > "$APP_DIR/kodrix-ide.png"
                   fi
-                  # Download appimagetool and extract it (it's itself an AppImage)
-                  curl -fSL --retry 3 "https://github.com/AppImage/AppImageKit/releases/download/continuous/appimagetool-x86_64.AppImage" -o /tmp/appimagetool.AppImage
+                  # Download appimagetool (correct arch) and extract it
+                  ARCH=${{ matrix.arch == 'aarch64' && 'aarch64' || 'x86_64' }}
+                  curl -fSL --retry 3 "https://github.com/AppImage/AppImageKit/releases/download/continuous/appimagetool-${ARCH}.AppImage" -o /tmp/appimagetool.AppImage
                   chmod +x /tmp/appimagetool.AppImage
                   # Extract appimagetool since FUSE isn't available on CI
                   /tmp/appimagetool.AppImage --appimage-extract 2>/dev/null || true

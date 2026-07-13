@@ -1,10 +1,9 @@
 name: CLI Runtime Tests (App Launch & Functional)
 
 on:
-  push:
-    branches: [test, main]
-  pull_request:
-    branches: [main]
+  workflow_run:
+    workflows: ["Build All Packages"]
+    types: [completed]
   workflow_dispatch:
     inputs:
       test_timeout:
@@ -14,7 +13,7 @@ on:
 
 concurrency:
   group: cli-test-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   # ═══════════════════════════════════════════════════════════════════════════
@@ -23,6 +22,7 @@ jobs:
   appimage-launch:
     name: "Linux AppImage — Build & Launch Test"
     runs-on: ubuntu-22.04
+    if: ${{ github.event.workflow_run.conclusion == 'success' || github.event_name == 'workflow_dispatch' }}
 
     steps:
       - name: Checkout
@@ -211,6 +211,7 @@ jobs:
   deb-install-launch:
     name: "Linux DEB — Install & Launch Test"
     runs-on: ubuntu-22.04
+    if: ${{ github.event.workflow_run.conclusion == 'success' || github.event_name == 'workflow_dispatch' }}
 
     steps:
       - name: Checkout
@@ -345,6 +346,7 @@ jobs:
   jvm-direct-launch:
     name: "JVM Direct Launch (no packaging)"
     runs-on: ubuntu-22.04
+    if: ${{ github.event.workflow_run.conclusion == 'success' || github.event_name == 'workflow_dispatch' }}
 
     steps:
       - name: Checkout
@@ -491,6 +493,7 @@ jobs:
   functional-tests:
     name: "Functional Tests (File I/O, Config, ViewModel)"
     runs-on: ubuntu-22.04
+    if: ${{ github.event.workflow_run.conclusion == 'success' || github.event_name == 'workflow_dispatch' }}
 
     steps:
       - name: Checkout
@@ -696,6 +699,7 @@ jobs:
   lsp-e2e:
     name: "LSP End-to-End (pylsp + clangd full session)"
     runs-on: ubuntu-22.04
+    if: ${{ github.event.workflow_run.conclusion == 'success' || github.event_name == 'workflow_dispatch' }}
 
     steps:
       - name: Checkout

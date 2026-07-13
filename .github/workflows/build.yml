@@ -133,17 +133,9 @@ jobs:
 
   # ── macOS: DMG ────────────────────────────────────────────────────────
   build-macos:
-    name: "macOS ${{ matrix.arch }} (DMG)"
-    runs-on: ${{ matrix.runner }}
+    name: "macOS arm64 (DMG)"
+    runs-on: macos-latest
     needs: []  # run in parallel
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - arch: arm64
-            runner: macos-latest
-          - arch: x86_64
-            runner: macos-13
 
     steps:
       - name: Checkout
@@ -176,7 +168,7 @@ jobs:
       - name: Upload macOS DMG
         uses: actions/upload-artifact@v4
         with:
-          name: macos-dmg-${{ matrix.arch }}
+          name: macos-dmg-arm64
           path: dist/
           retention-days: 30
 

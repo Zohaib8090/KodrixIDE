@@ -632,13 +632,27 @@ jobs:
       - name: Build AppImage
         run: ./gradlew :desktopApp:packageAppImage --no-daemon
 
+      - name: Stage AppImage (copy before DEB build overwrites)
+        run: |
+          mkdir -p dist
+          AI=$(find desktopApp/build/compose/binaries/main -name "*.AppImage" -type f | head -1)
+          if [ -n "$AI" ]; then
+              cp "$AI" dist/
+              echo "Staged AppImage: $(basename "$AI")"
+          else
+              # Also check without extension filter — Compose may use different naming
+              ls -R desktopApp/build/compose/binaries/main/ || true
+              echo "⚠️  No .AppImage file found, listing all outputs above"
+              exit 1
+          fi
+
       - name: Build DEB
         run: ./gradlew :desktopApp:packageDeb --no-daemon
 
       - name: Verify AppImage structure
         run: |
           echo "=== Desktop AppImage Verification ==="
-          AI=$(find desktopApp/build/compose/binaries/main -name "*.AppImage" | head -1)
+          AI=$(find dist -name "*.AppImage" | head -1)
 
           if [ -z "$AI" ]; then
               echo "❌ No AppImage found!"
@@ -674,7 +688,8 @@ jobs:
           cd /tmp
           chmod +x "$AI"
           # List embedded files using the AppImage's built-in extraction
-          if "$AI" --appimage-extract 2>/dev/null; then
+          # Use env to avoid FUSE issues on CI runners
+          if env APPIMAGE_EXTRACT_AND_RUN=1 "$AI" --appimage-extract 2>/dev/null; then
               echo "✅ AppImage extracted successfully"
 
               # Verify key files exist
@@ -695,12 +710,20 @@ jobs:
               # Clean up
               rm -rf /tmp/squashfs-root
           else
-              echo "⚠️  Could not extract AppImage (may need FUSE)"
-              # Try alternative extraction
-              if "$AI" --appimage-mount 2>/dev/null; then
-                  echo "✅ AppImage mount works"
+              # Try alternative: extract using unsquashfs directly
+              echo "⚠️  --appimage-extract failed, trying unsquashfs..."
+              if command -v unsquashfs &>/dev/null; then
+                  # Find the embedded squashfs offset in the AppImage
+                  OFFSET=$(env LANG=C strings "$AI" 2>/dev/null | grep -m1 '^[0-9]*$' || echo "")
+                  dd if="$AI" of=/tmp/squashfs.img bs=1 skip=${#AI} 2>/dev/null || true
+                  unsquashfs -d /tmp/squashfs-root -f "$AI" 2>/dev/null || true
+                  if [ -d /tmp/squashfs-root ]; then
+                      echo "✅ Extracted with unsquashfs"
+                  else
+                      echo "  (Extraction not possible — structure verification limited)"
+                  fi
               else
-                  echo "  (FUSE not available — extraction skipped)"
+                  echo "  (No unsquashfs available — extraction skipped)"
               fi
           fi
 

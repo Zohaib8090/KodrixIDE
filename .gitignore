@@ -51,6 +51,7 @@ log.txt
 !ROADMAP.md
 !STATE.md
 !CURRENT_TASK.md
+!**/CMakeLists.txt
 scripts/*.sh
 !scripts/
 !app/src/main/jniLibs/

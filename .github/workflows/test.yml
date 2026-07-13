@@ -405,76 +405,78 @@ jobs:
           fi
 
       - name: Test LSP protocol with Python validator
-        run: python3 -c "
-import json, sys
+        run: |
+          cat > /tmp/lsp_protocol_test.py << 'PYEOF'
+          import json, sys
 
-print('=== LSP Protocol Format Validator ===')
-tests_passed = 0
-tests_failed = 0
+          print('=== LSP Protocol Format Validator ===')
+          tests_passed = 0
+          tests_failed = 0
 
-# Test: JSON-RPC 2.0 initialize request format
-init = {
-    'jsonrpc': '2.0', 'id': 1, 'method': 'initialize',
-    'params': {
-        'processId': None, 'rootUri': 'file:///tmp',
-        'capabilities': {
-            'textDocument': {
-                'synchronization': {'didSave': True},
-                'completion': {'completionItem': {'snippetSupport': True}, 'contextSupport': True},
-                'publishDiagnostics': {'relatedInformation': True},
-                'hover': {'contentFormat': ['plaintext']}
-            }
-        }
-    }
-}
-s = json.dumps(init)
-header = f'Content-Length: {len(s.encode())}\r\n\r\n'
-msg = header + s
-assert 'Content-Length' in msg
-assert json.loads(msg.split('\r\n\r\n', 1)[1])['method'] == 'initialize'
-print('✅ Initialize request format valid')
-tests_passed += 1
+          # Test: JSON-RPC 2.0 initialize request format
+          init = {
+              'jsonrpc': '2.0', 'id': 1, 'method': 'initialize',
+              'params': {
+                  'processId': None, 'rootUri': 'file:///tmp',
+                  'capabilities': {
+                      'textDocument': {
+                          'synchronization': {'didSave': True},
+                          'completion': {'completionItem': {'snippetSupport': True}, 'contextSupport': True},
+                          'publishDiagnostics': {'relatedInformation': True},
+                          'hover': {'contentFormat': ['plaintext']}
+                      }
+                  }
+              }
+          }
+          s = json.dumps(init)
+          header = f'Content-Length: {len(s.encode())}\r\n\r\n'
+          msg = header + s
+          assert 'Content-Length' in msg
+          assert json.loads(msg.split('\r\n\r\n', 1)[1])['method'] == 'initialize'
+          print('  PASS: Initialize request format valid')
+          tests_passed += 1
 
-# Test: didOpen format
-did_open = {'jsonrpc': '2.0', 'method': 'textDocument/didOpen', 'params': {'textDocument': {'uri': 'file:///tmp/t.py', 'languageId': 'python', 'version': 1, 'text': 'print(1)\n'}}}
-s = json.dumps(did_open)
-assert json.loads(s)['params']['textDocument']['languageId'] == 'python'
-print('✅ didOpen format valid')
-tests_passed += 1
+          # Test: didOpen format
+          did_open = {'jsonrpc': '2.0', 'method': 'textDocument/didOpen', 'params': {'textDocument': {'uri': 'file:///tmp/t.py', 'languageId': 'python', 'version': 1, 'text': 'print(1)\n'}}}
+          s = json.dumps(did_open)
+          assert json.loads(s)['params']['textDocument']['languageId'] == 'python'
+          print('  PASS: didOpen format valid')
+          tests_passed += 1
 
-# Test: completion format
-comp = {'jsonrpc': '2.0', 'id': 2, 'method': 'textDocument/completion', 'params': {'textDocument': {'uri': 'file:///tmp/t.py'}, 'position': {'line': 0, 'character': 6}, 'context': {'triggerKind': 1}}}
-assert json.loads(json.dumps(comp))['method'] == 'textDocument/completion'
-print('✅ Completion request format valid')
-tests_passed += 1
+          # Test: completion format
+          comp = {'jsonrpc': '2.0', 'id': 2, 'method': 'textDocument/completion', 'params': {'textDocument': {'uri': 'file:///tmp/t.py'}, 'position': {'line': 0, 'character': 6}, 'context': {'triggerKind': 1}}}
+          assert json.loads(json.dumps(comp))['method'] == 'textDocument/completion'
+          print('  PASS: Completion request format valid')
+          tests_passed += 1
 
-# Test: diagnostics format
-diag = {'jsonrpc': '2.0', 'method': 'textDocument/publishDiagnostics', 'params': {'uri': 'file:///tmp/t.py', 'diagnostics': [{'range': {'start': {'line': 0, 'character': 0}, 'end': {'line': 0, 'character': 5}}, 'severity': 1, 'message': 'test'}]}}
-assert len(json.loads(json.dumps(diag))['params']['diagnostics']) == 1
-print('✅ Diagnostics format valid')
-tests_passed += 1
+          # Test: diagnostics format
+          diag = {'jsonrpc': '2.0', 'method': 'textDocument/publishDiagnostics', 'params': {'uri': 'file:///tmp/t.py', 'diagnostics': [{'range': {'start': {'line': 0, 'character': 0}, 'end': {'line': 0, 'character': 5}}, 'severity': 1, 'message': 'test'}]}}
+          assert len(json.loads(json.dumps(diag))['params']['diagnostics']) == 1
+          print('  PASS: Diagnostics format valid')
+          tests_passed += 1
 
-# Test: hover format
-hover = {'jsonrpc': '2.0', 'id': 3, 'method': 'textDocument/hover', 'params': {'textDocument': {'uri': 'file:///tmp/t.py'}, 'position': {'line': 0, 'character': 7}}}
-assert 'hover' in json.dumps(hover)
-print('✅ Hover request format valid')
-tests_passed += 1
+          # Test: hover format
+          hover = {'jsonrpc': '2.0', 'id': 3, 'method': 'textDocument/hover', 'params': {'textDocument': {'uri': 'file:///tmp/t.py'}, 'position': {'line': 0, 'character': 7}}}
+          assert 'hover' in json.dumps(hover)
+          print('  PASS: Hover request format valid')
+          tests_passed += 1
 
-# Test: definition format
-defn = {'jsonrpc': '2.0', 'id': 4, 'method': 'textDocument/definition', 'params': {'textDocument': {'uri': 'file:///tmp/t.py'}, 'position': {'line': 0, 'character': 7}}}
-assert 'definition' in json.dumps(defn)
-print('✅ Definition request format valid')
-tests_passed += 1
+          # Test: definition format
+          defn = {'jsonrpc': '2.0', 'id': 4, 'method': 'textDocument/definition', 'params': {'textDocument': {'uri': 'file:///tmp/t.py'}, 'position': {'line': 0, 'character': 7}}}
+          assert 'definition' in json.dumps(defn)
+          print('  PASS: Definition request format valid')
+          tests_passed += 1
 
-# Test: Content-Length header matches actual body length
-test_body = json.dumps({'jsonrpc': '2.0', 'id': 5, 'method': 'shutdown', 'params': None})
-cl = len(test_body.encode())
-assert f'Content-Length: {cl}' in f'Content-Length: {cl}\r\n\r\n{test_body}'
-print(f'✅ Content-Length header correct ({cl} bytes)')
-tests_passed += 1
+          # Test: Content-Length header matches actual body length
+          test_body = json.dumps({'jsonrpc': '2.0', 'id': 5, 'method': 'shutdown', 'params': None})
+          cl = len(test_body.encode())
+          assert f'Content-Length: {cl}' in f'Content-Length: {cl}\r\n\r\n{test_body}'
+          print(f'  PASS: Content-Length header correct ({cl} bytes)')
+          tests_passed += 1
 
-print(f'\nAll {tests_passed}/{tests_passed + tests_failed} protocol tests passed!')
-"
+          print(f'\nAll {tests_passed}/{tests_passed + tests_failed} protocol tests passed!')
+          PYEOF
+          python3 /tmp/lsp_protocol_test.py
 
   # ═══════════════════════════════════════════════════════════════════════════
   # Job 4: Android APK Build & Structure Verification

@@ -51,18 +51,30 @@ jobs:
       - name: Build AppImage
         run: ./gradlew :desktopApp:packageAppImage --no-daemon
 
-      - name: Locate AppImage
+      - name: Locate or create AppImage
         run: |
           mkdir -p dist
           AI=$(find desktopApp/build/compose/binaries/main -name "*.AppImage" -type f | head -1)
-          if [ -z "$AI" ]; then
-              echo "❌ AppImage not found after build"
-              ls -R desktopApp/build/compose/binaries/main/ || true
-              exit 1
+          if [ -n "$AI" ]; then
+              echo "✅ Gradle produced AppImage"
+          else
+              echo "⚠️  Gradle didn't produce .AppImage — using appimagetool fallback"
+              APP_DIR="desktopApp/build/compose/binaries/main/app/kodrix-ide"
+              if [ -d "$APP_DIR" ]; then
+                  wget -q "https://github.com/AppImage/AppImageKit/releases/download/continuous/appimagetool-x86_64.AppImage" -O /tmp/appimagetool
+                  chmod +x /tmp/appimagetool
+                  /tmp/appimagetool --no-fuse --comp zstd "$APP_DIR" "dist/kodrix-ide-1.2.0-x86_64.AppImage"
+                  AI="dist/kodrix-ide-1.2.0-x86_64.AppImage"
+                  echo "✅ AppImage created with appimagetool"
+              else
+                  echo "❌ App directory not found"
+                  ls -R desktopApp/build/compose/binaries/main/ || true
+                  exit 1
+              fi
           fi
           cp "$AI" dist/
-          echo "APPIMAGE_PATH=dist/$(basename "$AI")" >> "$GITHUB_ENV"
-          echo "Found: $(basename "$AI") ($(du -h "$AI" | cut -f1))"
+          echo "APPIMAGE_PATH=dist/$(basename "$(ls dist/*.AppImage | head -1)")" >> "$GITHUB_ENV"
+          echo "Found: $(ls dist/*.AppImage | head -1) ($(du -h dist/*.AppImage | cut -f1))"
 
       - name: Install xvfb and setup virtual display
         run: |

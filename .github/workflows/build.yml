@@ -116,6 +116,29 @@ jobs:
       - name: Build AppImage
         run: ./gradlew :desktopApp:packageAppImage --no-daemon
 
+      - name: Create AppImage (fallback if Gradle didn't produce one)
+        run: |
+          mkdir -p dist
+          AI=$(find desktopApp/build/compose/binaries/main -name "*.AppImage" -type f | head -1)
+          if [ -n "$AI" ]; then
+              echo "✅ Gradle produced AppImage: $(basename "$AI")"
+          else
+              echo "⚠️  No .AppImage found — creating manually with appimagetool"
+              APP_DIR="desktopApp/build/compose/binaries/main/app/kodrix-ide"
+              if [ -d "$APP_DIR" ]; then
+                  # Download appimagetool
+                  wget -q "https://github.com/AppImage/AppImageKit/releases/download/continuous/appimagetool-x86_64.AppImage" -O /tmp/appimagetool
+                  chmod +x /tmp/appimagetool
+                  # Create AppImage with --no-fuse (FUSE unavailable on CI runners)
+                  ARCH=${{ matrix.arch == 'aarch64' && 'aarch64' || 'x86_64' }}
+                  /tmp/appimagetool --no-fuse --comp zstd "$APP_DIR" "dist/kodrix-ide-1.2.0-${ARCH}.AppImage"
+                  echo "✅ AppImage created with appimagetool"
+              else
+                  echo "❌ App directory not found: $APP_DIR"
+                  ls -R desktopApp/build/compose/binaries/main/ || true
+              fi
+          fi
+
       - name: Collect artifacts
         run: |
           mkdir -p dist

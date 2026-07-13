@@ -639,6 +639,25 @@ jobs:
               echo "⚠️  Gradle didn't produce .AppImage — using appimagetool fallback"
               APP_DIR="desktopApp/build/compose/binaries/main/app/kodrix-ide"
               if [ -d "$APP_DIR" ]; then
+                  # Compose Desktop doesn't create .desktop file — add one for appimagetool
+                  cat > "$APP_DIR/kodrix-ide.desktop" << 'DEOF'
+                  [Desktop Entry]
+                  Name=Kodrix IDE
+                  Exec=kodrix-ide
+                  Icon=kodrix-ide
+                  Type=Application
+                  Categories=Development;IDE;
+                  DEOF
+                  # Copy icon if available
+                  if [ -f desktopApp/icon.png ]; then
+                      cp desktopApp/icon.png "$APP_DIR/kodrix-ide.png"
+                  elif [ -f desktopApp/build/resources/main/icon.png ]; then
+                      cp desktopApp/build/resources/main/icon.png "$APP_DIR/kodrix-ide.png"
+                  else
+                      # Create a minimal 1x1 PNG as placeholder
+                      printf '\x89PNG\r\n\x1a\n' > "$APP_DIR/kodrix-ide.png"
+                  fi
+                  # Download and extract appimagetool
                   curl -fSL --retry 3 "https://github.com/AppImage/AppImageKit/releases/download/continuous/appimagetool-x86_64.AppImage" -o /tmp/appimagetool.AppImage
                   chmod +x /tmp/appimagetool.AppImage
                   /tmp/appimagetool.AppImage --appimage-extract 2>/dev/null || true

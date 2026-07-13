@@ -640,16 +640,19 @@ jobs:
               APP_DIR="desktopApp/build/compose/binaries/main/app/kodrix-ide"
               if [ -d "$APP_DIR" ]; then
                   # Compose Desktop doesn't create .desktop file — add one for appimagetool
-                  cat > "$APP_DIR/kodrix-ide.desktop" << 'DEOF'
-                  [Desktop Entry]
-                  Name=Kodrix IDE
-                  Exec=kodrix-ide
-                  Icon=kodrix-ide
-                  Type=Application
-                  Categories=Development;IDE;
-                  DEOF
-                  # Copy icon if available
-                  if [ -f desktopApp/icon.png ]; then
+                  # NOTE: Use printf to avoid heredoc indentation issues in YAML
+                  printf '%s\n' \
+                    '[Desktop Entry]' \
+                    'Name=Kodrix IDE' \
+                    'Exec=kodrix-ide' \
+                    'Icon=kodrix-ide' \
+                    'Type=Application' \
+                    'Categories=Development;IDE;' \
+                    > "$APP_DIR/kodrix-ide.desktop"
+                  # Copy icon if available (check jpackage output, then source dirs)
+                  if [ -f "$APP_DIR/lib/kodrix-ide.png" ]; then
+                      cp "$APP_DIR/lib/kodrix-ide.png" "$APP_DIR/kodrix-ide.png"
+                  elif [ -f desktopApp/icon.png ]; then
                       cp desktopApp/icon.png "$APP_DIR/kodrix-ide.png"
                   elif [ -f desktopApp/build/resources/main/icon.png ]; then
                       cp desktopApp/build/resources/main/icon.png "$APP_DIR/kodrix-ide.png"

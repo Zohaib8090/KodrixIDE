@@ -522,7 +522,7 @@ jobs:
           CLASSPATH="desktopApp/build/classes/kotlin/main:desktopApp/build/resources/main:shared/build/classes/kotlin/desktop:shared/build/classes/kotlin/commonMain:$CLASSPATH"
           echo "CLASSPATH=$CLASSPATH" >> "$GITHUB_ENV"
 
-      - name: Run functional test: Class Loading & Instantiation
+      - name: "Run functional test: Class Loading & Instantiation"
         run: |
           echo "=== Test: Core Classes Loadable ==="
 
@@ -550,7 +550,7 @@ jobs:
               fi
           done
 
-      - name: Run functional test: LSP Protocol Serialization
+      - name: "Run functional test: LSP Protocol Serialization"
         run: |
           echo "=== Test: LSP Protocol Classes ==="
           # Verify LSP-related classes exist
@@ -566,7 +566,7 @@ jobs:
               fi
           done
 
-      - name: Run functional test: Config & Settings Persistence
+      - name: "Run functional test: Config & Settings Persistence"
         run: |
           echo "=== Test: Settings/Config File Handling ==="
           python3 << 'PYEOF'
@@ -625,7 +625,7 @@ jobs:
           print(f"✅ All config tests passed (cleaned up {test_dir})")
           PYEOF
 
-      - name: Run functional test: File Watcher & Editor State
+      - name: "Run functional test: File Watcher & Editor State"
         run: |
           echo "=== Test: File Operations ==="
           python3 << 'PYEOF'

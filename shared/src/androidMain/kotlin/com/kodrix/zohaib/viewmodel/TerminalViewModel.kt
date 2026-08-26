@@ -798,6 +798,8 @@ class TerminalViewModel(application: Application) : AndroidViewModel(application
                         "HOME" to filesDir.absolutePath,
                         "TMPDIR" to java.io.File(filesDir, "tmp").apply { mkdirs() }.absolutePath
                     )
+                    // Phase 6: emit a clangd compilation database so project-local #includes resolve
+                    ensureCompileCommands(projDir, sysrootInclude)
                     launchLspClient(ext, langId, file, projDir, command, env)
                 }
                 "python" -> {
@@ -910,6 +912,61 @@ class TerminalViewModel(application: Application) : AndroidViewModel(application
             ?.maxByOrNull { it.name }
     }
 
+    /**
+     * Generates a clangd-compatible compile_commands.json for the active project so that
+     * clangd can resolve project-local #includes and per-file compile flags (Phase 6 task).
+     *
+     * Dependency-free: scans C/C++ sources + include dirs and emits JSON via org.json.
+     * Regenerates only when the DB is missing or any source is newer than the DB, so a
+     * re-opened C/C++ file does not pay the scan cost every time.
+     *
+     * clangd auto-discovers compile_commands.json by walking up from the opened file, so
+     * writing it at the project root is enough — no clangd flag changes required.
+     */
+    private fun ensureCompileCommands(projDir: java.io.File, sysrootInclude: String) {
+        try {
+            val dbFile = java.io.File(projDir, "compile_commands.json")
+            val srcExts = setOf("c", "cpp", "cc", "cxx", "c++", "h", "hpp", "hh", "hxx")
+            val skipDirs = setOf(".git", "build", "node_modules", ".gradle", ".cxx")
+
+            val sources = mutableListOf<java.io.File>()
+            projDir.walkTopDown()
+                .onEnter { it.name !in skipDirs }
+                .filter { it.isFile && it.extension.lowercase() in srcExts }
+                .forEach { sources.add(it) }
+
+            if (sources.isEmpty()) return
+
+            val dbAge = if (dbFile.exists()) dbFile.lastModified() else 0L
+            val stale = sources.any { it.lastModified() > dbAge }
+            if (dbFile.exists() && !stale) return
+
+            // Collect include dirs: any dir named include/includes under the project + sysroot
+            val includeDirs = sortedSetOf<String>()
+            if (sysrootInclude.isNotBlank()) includeDirs.add(sysrootInclude)
+            projDir.walkTopDown()
+                .onEnter { it.name !in skipDirs }
+                .filter { it.isDirectory && (it.name == "include" || it.name == "includes") }
+                .forEach { includeDirs.add(it.absolutePath) }
+
+            val incFlags = includeDirs.joinToString(" ") { "-I\"$it\"" }
+            val arr = org.json.JSONArray()
+            for (src in sources) {
+                val isC = src.extension.lowercase() == "c"
+                val compiler = if (isC) "clang" else "clang++"
+                val std = if (isC) "-std=c11" else "-std=c++17"
+                val obj = org.json.JSONObject()
+                obj.put("directory", projDir.absolutePath)
+                obj.put("command", "$compiler $std $incFlags -c \"${src.absolutePath}\"")
+                obj.put("file", src.absolutePath)
+                arr.put(obj)
+            }
+            dbFile.writeText(arr.toString(2))
+            Log.d("Kodrix", "Generated compile_commands.json with ${sources.size} entries (${includeDirs.size} include dirs)")
+        } catch (e: Exception) {
+            Log.w("Kodrix", "Failed to generate compile_commands.json", e)
+        }
+    }
     /** Returns the Python install dir (versions/python/<version>) if any version is active. */
     private fun findPythonInstallDir(filesDir: java.io.File): java.io.File? {
         val pythonRoot = java.io.File(filesDir, "versions/python")

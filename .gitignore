@@ -85,3 +85,9 @@ next-swc-new.node
 *.pem
 *.key
 *.keystore
+
+# Crash / debug / analysis artifacts (never commit these)
+hs_err_pid*.log
+ld_debug_local.log
+qodana.sarif.json
+screen.png

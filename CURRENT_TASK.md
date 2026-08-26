@@ -40,8 +40,8 @@ This file serves as a persistent record of the project's progress, ensuring cont
 
 ### Pending / Next Up
 - [x] Integrate JetBrains JediTerm + Pty4J in desktopApp using SwingPanel for native, high-performance local terminal emulation.
-- [ ] Verify `clangd` autocomplete end-to-end after toolchain extraction completes on real hardware.
-- [ ] Add `compile_commands.json` generation support so `clangd` resolves project-specific include paths.
+- [x] Verify `clangd` autocomplete end-to-end after toolchain extraction completes on real hardware.
+- [x] Add `compile_commands.json` generation support so `clangd` resolves project-specific include paths.
 - [ ] React Native support.
 - [ ] Flutter support.
 

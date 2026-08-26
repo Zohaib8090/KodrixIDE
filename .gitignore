@@ -91,3 +91,6 @@ hs_err_pid*.log
 ld_debug_local.log
 qodana.sarif.json
 screen.png
+
+# Kotlin/Gradle build caches
+.kotlin/

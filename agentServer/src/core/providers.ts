@@ -75,6 +75,48 @@ const SEED: ProviderConfig[] = [
     streaming: true,
     enabled: false, // off by default — user opts in once they've installed Ollama
   },
+  {
+    id: "cohere",
+    label: "Cohere",
+    protocol: "cohere",
+    baseUrl: "https://api.cohere.com",
+    apiKeyRef: "env:COHERE_API_KEY",
+    models: ["command-r-plus", "command-r"],
+    supportsReasoning: false,
+    streaming: true,
+    enabled: false, // off until user provides a Cohere key
+  },
+  {
+    id: "bedrock",
+    label: "Amazon Bedrock",
+    protocol: "bedrock",
+    // Region baked into the base URL; user can override per-provider in the JSON.
+    baseUrl: "https://bedrock-runtime.us-east-1.amazonaws.com",
+    // apiKeyRef is "keyId:secretAccessKey:region" — see adapters/sigv4.ts
+    apiKeyRef: "env:AWS_BEDROCK_KEYS",
+    models: [
+      "anthropic.claude-sonnet-4-5-20250929-v1:0",
+      "anthropic.claude-haiku-4-5-20251001-v1:0",
+      "meta.llama3-1-70b-instruct-v1:0",
+      "mistral.mistral-large-2407-v1:0",
+    ],
+    supportsReasoning: true,
+    streaming: true,
+    enabled: false, // requires AWS access key + secret; off until configured
+  },
+  {
+    id: "vertex",
+    label: "Google Vertex AI",
+    protocol: "vertex",
+    // Region baked in; user can override per-provider in the JSON.
+    baseUrl: "https://us-central1-aiplatform.googleapis.com",
+    // apiKeyRef is the entire service-account JSON. Use literal: or file: scheme.
+    apiKeyRef: "env:VERTEX_SERVICE_ACCOUNT_JSON",
+    models: ["gemini-2.5-pro", "gemini-2.5-flash", "claude-sonnet-4-5@20250929"],
+    supportsReasoning: true,
+    streaming: true,
+    enabled: false, // requires GCP service account; off until configured
+  },
 ];
 
 interface ProvidersFile {
@@ -101,6 +143,18 @@ export class ProviderRegistry {
     try {
       const raw = await fs.readFile(PROVIDERS_FILE, "utf8");
       data = JSON.parse(raw) as ProvidersFile;
+      // Merge any seed providers that the user's file doesn't have yet.
+      // Never overwrite user edits — only add missing ones (with the seed's
+      // enabled: false default, so they remain opt-in).
+      const haveIds = new Set(data.providers.map((p) => p.id));
+      let added = false;
+      for (const seed of SEED) {
+        if (!haveIds.has(seed.id)) {
+          data.providers.push(seed);
+          added = true;
+        }
+      }
+      if (added) await this.persist(data);
     } catch (err: unknown) {
       const code = (err as NodeJS.ErrnoException).code;
       if (code === "ENOENT") {
@@ -185,7 +239,7 @@ function validateProvider(p: ProviderConfig): void {
     throw new Error(`Invalid provider id: ${JSON.stringify(p.id)}`);
   }
   if (!p.label?.trim()) throw new Error(`Provider ${p.id}: label required`);
-  if (!["openai", "anthropic", "gemini"].includes(p.protocol)) {
+  if (!["openai", "anthropic", "gemini", "cohere", "bedrock", "vertex"].includes(p.protocol)) {
     throw new Error(`Provider ${p.id}: unknown protocol ${p.protocol}`);
   }
   if (!p.baseUrl?.startsWith("http")) {

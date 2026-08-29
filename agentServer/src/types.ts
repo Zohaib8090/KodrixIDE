@@ -10,7 +10,13 @@
 
 // ---------- Provider identity ----------
 
-export type ProviderProtocol = "openai" | "anthropic" | "gemini";
+export type ProviderProtocol =
+  | "openai"
+  | "anthropic"
+  | "gemini"
+  | "cohere"
+  | "bedrock"
+  | "vertex";
 
 export interface ProviderConfig {
   /** Stable id used in API paths. Lowercase, no spaces. */

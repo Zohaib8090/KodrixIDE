@@ -10,12 +10,18 @@ import type { ProviderAdapter, ProviderConfig, ProviderProtocol } from "../types
 import { OpenAIAdapter } from "./openai.js";
 import { AnthropicAdapter, translateAnthropicStreamChunk } from "./anthropic.js";
 import { GeminiAdapter, translateGeminiStreamChunk } from "./gemini.js";
+import { CohereAdapter, translateCohereStreamChunk } from "./cohere.js";
+import { BedrockAdapter, translateBedrockStreamChunk } from "./bedrock.js";
+import { VertexAdapter, translateVertexStreamChunk } from "./vertex.js";
 import { translateOpenAIChunk } from "./openai.js";
 
 const ADAPTERS: Record<ProviderProtocol, ProviderAdapter> = {
   openai: new OpenAIAdapter(),
   anthropic: new AnthropicAdapter(),
   gemini: new GeminiAdapter(),
+  cohere: new CohereAdapter(),
+  bedrock: new BedrockAdapter(),
+  vertex: new VertexAdapter(),
 };
 
 export function adapterFor(protocol: ProviderProtocol): ProviderAdapter {
@@ -37,5 +43,11 @@ export function streamChunkTranslator(provider: ProviderConfig): (raw: string) =
       return translateAnthropicStreamChunk;
     case "gemini":
       return translateGeminiStreamChunk;
+    case "cohere":
+      return translateCohereStreamChunk;
+    case "bedrock":
+      return translateBedrockStreamChunk;
+    case "vertex":
+      return translateVertexStreamChunk;
   }
 }

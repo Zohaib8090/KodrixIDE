@@ -101,5 +101,11 @@ function pickProbeModel(p: ProviderConfig): string {
       return "claude-haiku-4-5";
     case "gemini":
       return "gemini-2.5-flash";
+    case "cohere":
+      return "command-r-plus";
+    case "bedrock":
+      return "anthropic.claude-haiku-4-5-20251001-v1:0";
+    case "vertex":
+      return "gemini-2.5-flash";
   }
 }

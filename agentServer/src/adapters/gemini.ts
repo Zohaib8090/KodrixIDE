@@ -27,7 +27,7 @@ interface GeminiContent {
   parts: GeminiPart[];
 }
 
-interface GeminiRequest {
+export interface GeminiRequest {
   contents: GeminiContent[];
   systemInstruction?: { parts: GeminiPart[] };
   tools?: Array<{
@@ -83,7 +83,7 @@ export class GeminiAdapter implements ProviderAdapter {
 
 // ---------- Request translation ----------
 
-function translateRequest(req: CanonicalChatRequest): GeminiRequest {
+export function translateRequest(req: CanonicalChatRequest): GeminiRequest {
   const out: GeminiRequest = { contents: [] };
 
   for (const m of req.messages) {
@@ -161,7 +161,7 @@ function translateRequest(req: CanonicalChatRequest): GeminiRequest {
 
 // ---------- Response translation ----------
 
-function translateResponse(gemini: unknown): unknown {
+export function translateResponse(gemini: unknown): unknown {
   const r = gemini as {
     candidates?: Array<{
       content: { parts: GeminiPart[]; role: string };

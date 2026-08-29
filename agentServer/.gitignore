@@ -1,0 +1,6 @@
+node_modules/
+dist/
+data/providers.json
+data/idle-timer.json
+data/sessions/
+*.log

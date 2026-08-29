@@ -1,0 +1,30 @@
+{
+  "name": "@kodrix/agent-server",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Unified LLM router for Kodrix IDE — fans out to OpenAI/Anthropic/Gemini/custom backends behind a single OpenAI-compatible surface.",
+  "type": "module",
+  "main": "dist/server.js",
+  "bin": {
+    "kodrix-agent": "dist/server.js"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/server.js",
+    "dev": "tsx watch src/server.ts",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "smoke": "node scripts/smoke.mjs"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "dependencies": {
+    "fastify": "^5.1.0",
+    "@fastify/cors": "^10.0.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2"
+  }
+}

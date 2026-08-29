@@ -85,7 +85,7 @@ class TerminalViewModel(application: Application) : AndroidViewModel(application
 
     private val aiManager = com.kodrix.zohaib.ai.AIBackendManager(application)
     val binaryManager = com.kodrix.zohaib.bridge.BinaryManager(application)
-    val agentOrchestrator = com.kodrix.zohaib.ai.AgentOrchestrator(aiManager, binaryManager)
+    val agentOrchestrator = com.kodrix.zohaib.ai.AgentOrchestrator(application, aiManager, binaryManager)
     
     private val _aiChatMessages = MutableStateFlow<List<ChatMessage>>(emptyList())
     val aiChatMessages = _aiChatMessages.asStateFlow()

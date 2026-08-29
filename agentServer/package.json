@@ -10,6 +10,8 @@
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",
+    "build:bundle": "esbuild src/server.ts --bundle --platform=node --target=node22 --format=esm --outfile=dist/server.bundled.js --banner:js=\"import { createRequire as __kodrixCR } from 'node:module'; const require = __kodrixCR(import.meta.url);\"",
+    "build:android": "tsc -p tsconfig.json && esbuild src/server.ts --bundle --platform=node --target=node22 --format=esm --outfile=dist/server.bundled.js --banner:js=\"import { createRequire as __kodrixCR } from 'node:module'; const require = __kodrixCR(import.meta.url);\" && node scripts/copy-to-assets.mjs",
     "start": "node dist/server.js",
     "dev": "tsx watch src/server.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit",

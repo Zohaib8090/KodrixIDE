@@ -1,6 +1,8 @@
 package com.kodrix.zohaib.ai
 
+import android.content.Context
 import android.util.Log
+import com.kodrix.zohaib.agent.AgentServerLauncher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -18,9 +20,16 @@ enum class AgentRole(val displayName: String, val header: String) {
 }
 
 class AgentOrchestrator(
+    private val context: Context,
     private val aiManager: com.kodrix.zohaib.ai.AIBackendManager,
     private val binaryManager: com.kodrix.zohaib.bridge.BinaryManager
 ) {
+    /**
+     * Lazy agent server launcher. Created on first agent-mode entry so the
+     * server isn't spawned (and the bundled JS isn't extracted) until the
+     * user actually wants it. The server has its own 12-minute idle timer.
+     */
+    private val agentServer: AgentServerLauncher by lazy { AgentServerLauncher(context) }
 
     private val scope = CoroutineScope(Dispatchers.IO)
     private var loopJob: Job? = null
@@ -54,8 +63,25 @@ class AgentOrchestrator(
 
     fun toggleAgentMode(enabled: Boolean) {
         _isAgentMode.value = enabled
-        if (!enabled) {
+        if (enabled) {
+            // Spawn the agent server in the background; don't block the UI.
+            // The launcher's start() handles extraction + health-check.
+            scope.launch {
+                _orchestratorState.value = "Starting agent server..."
+                val ok = agentServer.start()
+                _orchestratorState.value = if (ok) {
+                    "Agent server ready at ${agentServer.baseUrl}"
+                } else {
+                    "Agent server failed to start (see logcat tag 'kodrix-agent')"
+                }
+            }
+        } else {
             stopLoop()
+            // Stop the server too — the user just said "I'm done with the agent".
+            // The launcher's stop() is fast (kills the child; < 1 second).
+            // If the user re-toggles within the 12-min window, start() will
+            // detect a healthy child via healthCheck and return early.
+            scope.launch { agentServer.stop() }
         }
     }
 

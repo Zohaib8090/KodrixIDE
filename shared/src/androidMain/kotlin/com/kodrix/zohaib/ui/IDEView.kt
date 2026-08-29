@@ -479,7 +479,37 @@ fun AIChatContent(viewModel: TerminalViewModel) {
         if (isAgentMode) {
             val agentWorkspaces by viewModel.agentOrchestrator.workspaces.collectAsState()
             val activeRole by viewModel.agentOrchestrator.activeRole.collectAsState()
-            
+
+            // Poll the agent server's health + wire the tool context for the
+            // current project. The tool context is what the agent uses when
+            // it calls read_file / write_file / run_shell etc.
+            val context = LocalContext.current
+            val viewModelRef = viewModel
+            val currentProject: String? = viewModelRef.activeProject.value
+            androidx.compose.runtime.LaunchedEffect(Unit) {
+                while (true) {
+                    viewModelRef.agentServerHealthy.value = try {
+                        val conn = java.net.URL("http://127.0.0.1:3080/healthz").openConnection() as java.net.HttpURLConnection
+                        conn.connectTimeout = 1_000
+                        conn.readTimeout = 1_000
+                        val ok = conn.responseCode == 200
+                        conn.disconnect()
+                        ok
+                    } catch (_: Throwable) { false }
+                    kotlinx.coroutines.delay(2_000)
+                }
+            }
+            androidx.compose.runtime.LaunchedEffect(currentProject) {
+                val proj: String? = currentProject
+                val ctx = if (proj != null) {
+                    com.kodrix.zohaib.agent.AndroidToolContext(
+                        appContext = context,
+                        projectRootPath = java.io.File(viewModelRef.projectsRoot, proj).absolutePath,
+                    )
+                } else null
+                if (ctx != null) viewModelRef.autoAgent.setToolContext(ctx)
+            }
+
             // Tab Row for Agents
             ScrollableTabRow(
                 selectedTabIndex = activeRole.ordinal,
@@ -499,78 +529,25 @@ fun AIChatContent(viewModel: TerminalViewModel) {
                     Tab(
                         selected = activeRole == role,
                         onClick = { viewModel.agentOrchestrator.setActiveRole(role) },
-                        text = { 
+                        text = {
                             Text(
-                                role.name.take(3), 
-                                fontSize = (10 * uiScale).sp, 
+                                role.name.take(3),
+                                fontSize = (10 * uiScale).sp,
                                 fontWeight = if (activeRole == role) FontWeight.Bold else FontWeight.Normal
-                            ) 
+                            )
                         }
                     )
                 }
             }
 
-            Box(modifier = Modifier.weight(1f).fillMaxWidth().padding(16.dp)) {
-                Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
-                    val currentContent = agentWorkspaces[activeRole] ?: "[Empty]"
-                    MarkdownText(
-                        text = currentContent,
-                        color = Color(0xFFCDD9E5),
-                        fontSize = (13 * uiScale).sp
-                    )
-                    
-                    if (orchestratorState.contains(activeRole.displayName) && orchestratorState.contains("running")) {
-                        Spacer(Modifier.height(8.dp))
-                        Text("${activeRole.displayName} is processing...", color = Color.Gray, fontSize = (11 * uiScale).sp, fontStyle = androidx.compose.ui.text.font.FontStyle.Italic)
-                    }
-                    
-                    Spacer(Modifier.height(16.dp))
-                }
-            }
-            
-            Box(modifier = Modifier.padding(16.dp)) {
-                Column {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text("Status: $orchestratorState", color = if (orchestratorState.contains("Error") || orchestratorState.contains("Paused")) Color(0xFFF85149) else Color(0xFF58A6FF), fontSize = (11 * uiScale).sp)
-                        Spacer(Modifier.weight(1f))
-                        IconButton(onClick = { viewModel.agentOrchestrator.stopLoop() }, modifier = Modifier.size((20 * uiScale).dp)) {
-                            Icon(Icons.Default.Stop, null, tint = Color(0xFFF85149), modifier = Modifier.size((14 * uiScale).dp))
-                        }
-                    }
-                    Spacer(Modifier.height(8.dp))
-                    
-                    if (pendingQuestion != null) {
-                        Text(pendingQuestion!!, color = Color(0xFFD29922), fontSize = (12 * uiScale).sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(bottom = 8.dp))
-                    }
-                    
-                    OutlinedTextField(
-                        value = text,
-                        onValueChange = { text = it },
-                        modifier = Modifier.fillMaxWidth(),
-                        placeholder = { Text(if (pendingQuestion != null) "Answer question..." else "Enter a goal to start agents...", color = Color.Gray, fontSize = (13 * uiScale).sp) },
-                        textStyle = TextStyle(color = Color.White, fontSize = (14 * uiScale).sp),
-                        maxLines = 4,
-                        trailingIcon = {
-                            IconButton(onClick = {
-                                if (text.isNotBlank()) {
-                                    if (pendingQuestion != null) {
-                                        viewModel.agentOrchestrator.answerQuestion(text)
-                                    } else {
-                                        viewModel.agentOrchestrator.startGoal(text)
-                                    }
-                                    text = ""
-                                }
-                            }) {
-                                Icon(Icons.Default.Send, null, tint = Color(0xFF58A6FF))
-                            }
-                        },
-                        colors = OutlinedTextFieldDefaults.colors(
-                            focusedBorderColor = Color(0xFF58A6FF),
-                            unfocusedBorderColor = Color(0xFF30363D)
-                        )
-                    )
-                }
-            }
+            // The new Hermes-style agent panel replaces the old multi-agent
+            // markdown workspace. It talks to the same spawned agent server
+            // and exposes: chat + auto-run + tool approval + status.
+            com.kodrix.zohaib.ui.AgentPanel(
+                agent = viewModel.autoAgent,
+                serverHealthy = viewModel.agentServerHealthy.value,
+                modifier = Modifier.weight(1f).fillMaxWidth(),
+            )
         } else {
             LazyColumn(
                 state = listState,

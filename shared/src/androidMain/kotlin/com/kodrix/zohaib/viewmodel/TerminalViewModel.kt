@@ -86,6 +86,33 @@ class TerminalViewModel(application: Application) : AndroidViewModel(application
     private val aiManager = com.kodrix.zohaib.ai.AIBackendManager(application)
     val binaryManager = com.kodrix.zohaib.bridge.BinaryManager(application)
     val agentOrchestrator = com.kodrix.zohaib.ai.AgentOrchestrator(application, aiManager, binaryManager)
+
+    // The Hermes-style agent runtime. Talks to the local agent server
+    // (spawned by AgentServerLauncher when the user toggles agent mode on).
+    // Has its own state flows for messages / status / pending tool approvals
+    // that the new AgentPanel Compose UI binds to.
+    val autoAgent: com.kodrix.zohaib.agent.AutoAgent by lazy {
+        val http = com.kodrix.zohaib.agent.AiHttpClient("http://127.0.0.1:3080")
+        val toolRegistry = com.kodrix.zohaib.agent.ToolRegistry(com.kodrix.zohaib.agent.StandardTools.all)
+        val fs = com.kodrix.zohaib.agent.hermes.AndroidFileSystem(java.io.File(application.filesDir, "agent"))
+        val skillLoader = com.kodrix.zohaib.agent.hermes.SkillLoader(fs, "skills")
+        skillLoader.loadAll()
+        val memory = com.kodrix.zohaib.agent.hermes.MemoryStore(fs, "memory.json")
+        val subagent = com.kodrix.zohaib.agent.hermes.Subagent(skillLoader, memory)
+        val agentScope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO + kotlinx.coroutines.SupervisorJob())
+        com.kodrix.zohaib.agent.AutoAgent(
+            http = http,
+            registry = toolRegistry,
+            skills = skillLoader,
+            memory = memory,
+            subagent = subagent,
+            scope = agentScope,
+        )
+    }
+
+    /** Whether the local agent server is healthy. Polled by the IDEView. */
+    val agentServerHealthy: kotlinx.coroutines.flow.MutableStateFlow<Boolean> =
+        kotlinx.coroutines.flow.MutableStateFlow(false)
     
     private val _aiChatMessages = MutableStateFlow<List<ChatMessage>>(emptyList())
     val aiChatMessages = _aiChatMessages.asStateFlow()
@@ -1619,7 +1646,7 @@ class TerminalViewModel(application: Application) : AndroidViewModel(application
     val autoScroll = _autoScroll.asStateFlow()
 
     // ── Project Management ────────────────────────────────────────────────────
-    private val projectsRoot get() = java.io.File(getApplication<Application>().filesDir, "projects")
+    val projectsRoot get() = java.io.File(getApplication<Application>().filesDir, "projects")
     private val _projects = MutableStateFlow<List<String>>(emptyList())
     val projects = _projects.asStateFlow()
     private val _activeProject = MutableStateFlow<String?>(prefs.getString("active_project", null))

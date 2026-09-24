@@ -151,6 +151,42 @@ Also run a **baseline** of tests 1–2 with a plain `execve` (no linker, no prel
 
 Steps: (a) wire `LD_PRELOAD` (from `nativeLibraryDir`) into the terminal/LSP process env, (b) generalise the exec hook from `node`-only to "any ELF under a pack prefix", (c) add shebang handling and the `/proc/self/exe` fix, (d) rerun the matrix.
 
+**Implementation status:** (a)–(c) exist as `androidApp/src/main/cpp/kodrix_exec.c`
+(`libkodrix_exec.so`), covering `execve`/`execv`/`execvp`/`execvpe`,
+`posix_spawn`/`posix_spawnp`, the path-redirect hooks, and the shebang/`/proc/self/exe`
+handling described in §2.A/§2.B/§2.F. Verified on host (glibc, not bionic/NDK — this session
+had no Android device or NDK toolchain): compiles and links cleanly, and doesn't break plain
+commands, nested `sh -c`, PATH search, or Python's `subprocess` (which uses `posix_spawn`
+internally); real failures (`EACCES`) log correctly while routine `ENOENT` PATH-search misses
+are suppressed so the log stays readable. **This is not (d) — the actual matrix has not run on
+a device.**
+
+**How to run (d) yourself, using Kodrix's own terminal — no separate Termux install, no
+`TermuxPackageManager` needed yet:**
+1. Build and install this branch's APK, open Settings → Developer, turn on **Beta Mode**,
+   then turn on **Native Exec Bridge**.
+2. Open a new terminal tab (the toggle only takes effect for new sessions).
+3. Download a Termux package's `.deb` and extract it into `$KODRIX_ROOT`
+   (`filesDir/kodrix-lang-root`, already on `PATH`-adjacent and pre-created), e.g.:
+   ```
+   curl -O https://packages-cf.termux.dev/apt/termux-main/pool/main/p/python/python_3.14.6-1_aarch64.deb
+   ar x python_3.14.6-1_aarch64.deb
+   tar --strip-components=5 -xf data.tar.xz -C "$KODRIX_ROOT"   # strips ./data/data/com.termux/files/
+   ```
+4. Run the extracted binary directly: `$KODRIX_ROOT/usr/bin/python3.14 -c "print(1)"` (test #1).
+   No manual `linker64`/`LD_PRELOAD` invocation needed — the shim intercepts the `execve`
+   automatically once it's preloaded into the shell.
+5. Work through the rest of the matrix (`clang`, child excs, shebang scripts, `pip`/`sysconfig`
+   path leakage) the same way.
+6. Settings → Developer → **View Exec Log** shows every rewrite decision and any real failure
+   (`kodrix_exec.log` in `filesDir`), without needing `adb logcat`.
+7. Record results (device model, Android version, per-test pass/fail, log excerpts for
+   failures) in a `SPIKE_RESULTS.md` as this section originally specified.
+
+If a test fails, the log is the first thing to check — and if the log itself is empty, that
+means `LD_PRELOAD` never took effect (check the toggle actually applied to a *new* terminal
+session, not one already open).
+
 **Fallbacks if it fails or proves too leaky — try in this order (decided, since distribution is GitHub/F-Droid only, §12):**
 1. `targetSdk = 28` — direct `execve` works again (this is what Termux itself does). Cheapest option, and now allowed because Play Store is out of scope. Downsides: Android may raise the minimum installable targetSdk in future, and it forfeits some newer platform behaviours. If chosen, ExecProxy is still needed for path redirect (constraint B) but no longer for exec interception.
 2. `proot`-style ptrace exec interception — robust and handles static binaries, but slower.

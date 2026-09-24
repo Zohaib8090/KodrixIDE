@@ -46,7 +46,6 @@ compile_log_2.txt
 compile_log_3.txt
 compile_log_4.txt
 log.txt
-*.txt
 !PROJECT.md
 !ROADMAP.md
 !STATE.md

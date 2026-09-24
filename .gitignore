@@ -46,7 +46,6 @@ compile_log_2.txt
 compile_log_3.txt
 compile_log_4.txt
 log.txt
-*.txt
 !PROJECT.md
 !ROADMAP.md
 !STATE.md
@@ -54,7 +53,7 @@ log.txt
 scripts/*.sh
 !scripts/
 !app/src/main/jniLibs/
-t e m p - b u i l d /  
+temp-build/  
 
 # Kodrix Scratch & Temp
 __pycache__/

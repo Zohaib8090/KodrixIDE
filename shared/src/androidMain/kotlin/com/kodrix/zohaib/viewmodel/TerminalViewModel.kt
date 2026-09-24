@@ -85,7 +85,21 @@ class TerminalViewModel(application: Application) : AndroidViewModel(application
 
     private val aiManager = com.kodrix.zohaib.ai.AIBackendManager(application)
     val binaryManager = com.kodrix.zohaib.bridge.BinaryManager(application)
-    val agentOrchestrator = com.kodrix.zohaib.ai.AgentOrchestrator(application, aiManager, binaryManager)
+
+    private val agentServerLauncher: com.kodrix.zohaib.agent.AgentServerLauncher by lazy {
+        com.kodrix.zohaib.agent.AgentServerLauncher(application)
+    }
+
+    private val _isAgentMode = MutableStateFlow(false)
+    val isAgentMode = _isAgentMode.asStateFlow()
+
+    /** Toggle agent mode: spawns/stops the local agent server (AutoAgent talks to it over HTTP). */
+    fun toggleAgentMode(enabled: Boolean) {
+        _isAgentMode.value = enabled
+        viewModelScope.launch(Dispatchers.IO) {
+            if (enabled) agentServerLauncher.start() else agentServerLauncher.stop()
+        }
+    }
 
     // The Hermes-style agent runtime. Talks to the local agent server
     // (spawned by AgentServerLauncher when the user toggles agent mode on).
@@ -1714,13 +1728,6 @@ class TerminalViewModel(application: Application) : AndroidViewModel(application
         startLogcatStream()
         checkUpdate()
         testNetwork()
-        
-        // Sync active project to agent (Safe here)
-        viewModelScope.launch {
-            _activeProject.collect { proj ->
-                agentOrchestrator.updateActiveProject(proj)
-            }
-        }
     }
 
     private fun testNetwork() {

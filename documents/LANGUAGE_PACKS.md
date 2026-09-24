@@ -6,6 +6,15 @@
 taps **Install** on a language, and can immediately edit (highlighting + LSP) and run code in it.
 **Toolchain source (decided):** Termux packages only.
 
+> **No Termux app required.** "Termux packages" means Kodrix itself downloads the prebuilt
+> package files (`.deb`) that Termux publishes on its public package servers, and unpacks them
+> into Kodrix's own storage. The user never installs or sees Termux. The C/C++ toolchain install
+> already works this way today (`TerminalViewModel.kt:1056`).
+
+**User experience in one line:** open the **Languages** panel → pick a language → tick the
+optional parts you want (language server, extra tools) → **Install** → it just works, and
+keeps itself updated.
+
 ---
 
 ## 1. How languages work today
@@ -86,7 +95,7 @@ resolver makes this automatic and correct for any language.
 ### E. Python doesn't come from Termux today
 
 Python 3.13.13 is a self-hosted zip on `KodrixMarketplace` releases (`TerminalViewModel.kt:3822`).
-With the Termux-only decision, Python moves to Termux's `python` + `python-pip` packages (§8).
+With the Termux-only decision, Python moves to Termux's `python` + `python-pip` packages (§9).
 
 ---
 
@@ -225,18 +234,48 @@ languages/
 | `schema` | ✓ | Manifest format version. The app hides packs with a newer schema than it understands and says "Update Kodrix to install this language". |
 | `id`, `name`, `description`, `icon` | ✓ | Identity + display. |
 | `languages[]` | ✓ | `{ languageId, extensions[], filenames[] }`: which files this pack handles (e.g. `filenames: ["Cargo.toml"]`). Replaces `getLanguageId()`. |
-| `termux.packages[]` | ✓ | Top-level Termux package names; dependencies are resolved automatically. |
-| `termux.ignoreDeps[]` | | Pack-specific extra ignore-list entries. |
+| `components[]` | ✓ | The installable parts of the language, shown as checkboxes in the install dialog (see "Components" below). |
+| `ignoreDeps[]` | | Pack-specific extra ignore-list entries for the dependency resolver. |
 | `requiresPacks[]` | | Other packs that must be installed first (e.g. a pack whose pip packages need `c-cpp` to build native extensions). |
 | `env{}` | | Env vars for everything this pack launches, e.g. `PYTHONHOME`, `CPATH`. Supports the variables below. |
-| `postInstall[][]` | | Commands run once after install, as **argv arrays, not shell strings** (e.g. `pip install python-lsp-server`). |
-| `verify` | | `{ command[], expect }`: a smoke test run after install; install is marked failed if output doesn't contain `expect`. |
-| `lsp` | | `{ command[], initializationOptions{}, prepare }`: how to start the language server over stdio. `prepare` names a built-in Kotlin hook (see below). |
+| `lsp` | | `{ component, command[], initializationOptions{}, prepare }`: how to start the language server over stdio. Only active if `component` is installed. `prepare` names a built-in Kotlin hook (see below). |
 | `run` | | `{ file, project: { detect, command } }`: templates for the Run button. `file` runs the current file; `project` applies when a marker file like `Cargo.toml` exists. |
 | `syntax` | | `{ keywords[], types[], constants[], lineComment, blockComment[2], stringDelimiters[] }`: fed to a generic highlighter replacing `SyntaxHighlighter.kt`'s per-language lists. (TextMate grammars could replace this later.) |
 
 **Variables** available in `env`, `lsp`, `run`, `postInstall`, `verify`:
 `$PREFIX` (`filesDir/termux/usr`), `$HOME`, `$TMPDIR`, `{file}`, `{dir}`, `{stem}`, `{project}`.
+
+### Components (optional parts)
+
+Every language is split into **components**. The install dialog shows them as checkboxes:
+
+```
+┌─ Install Rust ─────────────────────────────────────────┐
+│ ☑ Compiler & Cargo            required     180 MB      │
+│ ☑ Language server             recommended   40 MB      │
+│   (autocomplete, errors, go-to-definition)             │
+│ ☐ Formatter & linter          optional      15 MB      │
+│   (rustfmt, clippy)                                    │
+│                                                        │
+│ Total: 220 MB download · 780 MB on device              │
+│                          [ Cancel ]  [ Install ]       │
+└────────────────────────────────────────────────────────┘
+```
+
+Component fields:
+
+| Field | Meaning |
+|---|---|
+| `id`, `name`, `description` | Identity + the text under the checkbox. |
+| `required` | `true` = always installed, checkbox locked on. |
+| `default` | Pre-ticked in the dialog (for "recommended" parts like the LSP). |
+| `packages[]` | Termux packages for this component. Dependencies are resolved automatically and shared between components (installed once). |
+| `postInstall[][]` | Commands run once after this component installs, as **argv arrays, not shell strings** (e.g. `pip install python-lsp-server`). |
+| `verify` | `{ command[], expect }`: smoke test after install; the component is marked failed (and rolled back) if the output doesn't contain `expect`. |
+
+After install, the language's panel entry keeps showing the components, so the user can add
+or remove any optional part later (e.g. install the LSP next week without reinstalling Rust).
+Sizes are computed live from the Termux index (`Size` / `Installed-Size`), never hardcoded.
 
 **Built-in hooks (`lsp.prepare`).** Some language smarts don't fit in JSON. Today's
 `ensureCompileCommands()` (`TerminalViewModel.kt:967`) generates `compile_commands.json` so clangd
@@ -261,10 +300,15 @@ These show intent. Exact Termux package names and flags get confirmed against th
     { "languageId": "c",   "extensions": ["c", "h"] },
     { "languageId": "cpp", "extensions": ["cpp", "cc", "cxx", "hpp", "hh", "hxx"] }
   ],
-  "termux": { "packages": ["clang", "ndk-sysroot"] },
+  "components": [
+    { "id": "compiler", "name": "Clang compiler + C/C++ headers", "required": true,
+      "packages": ["clang", "ndk-sysroot"],
+      "verify": { "command": ["$PREFIX/bin/clang", "--version"], "expect": "clang version" } },
+    { "id": "build-tools", "name": "Make & CMake", "default": false,
+      "packages": ["make", "cmake"] }
+  ],
   "env": { "CPATH": "$PREFIX/include" },
-  "verify": { "command": ["$PREFIX/bin/clang", "--version"], "expect": "clang version" },
-  "lsp": { "command": ["$PREFIX/bin/clangd", "--stdio"], "prepare": "compile-commands" },
+  "lsp": { "component": "compiler", "command": ["$PREFIX/bin/clangd", "--stdio"], "prepare": "compile-commands" },
   "run": {
     "file": "clang++ {file} -o $TMPDIR/{stem} && $TMPDIR/{stem}",
     "project": { "detect": "Makefile", "command": "make" }
@@ -285,11 +329,16 @@ These show intent. Exact Termux package names and flags get confirmed against th
   "id": "python",
   "name": "Python",
   "languages": [ { "languageId": "python", "extensions": ["py", "pyw"] } ],
-  "termux": { "packages": ["python", "python-pip"] },
+  "components": [
+    { "id": "runtime", "name": "Python 3 + pip", "required": true,
+      "packages": ["python", "python-pip"],
+      "verify": { "command": ["$PREFIX/bin/python3", "--version"], "expect": "Python 3" } },
+    { "id": "lsp", "name": "Language server (pylsp)", "default": true,
+      "description": "Autocomplete, errors, hover docs",
+      "postInstall": [ ["$PREFIX/bin/python3", "-m", "pip", "install", "python-lsp-server"] ] }
+  ],
   "env": { "PYTHONHOME": "$PREFIX" },
-  "postInstall": [ ["$PREFIX/bin/python3", "-m", "pip", "install", "python-lsp-server"] ],
-  "verify": { "command": ["$PREFIX/bin/python3", "--version"], "expect": "Python 3" },
-  "lsp": { "command": ["$PREFIX/bin/python3", "-m", "pylsp"] },
+  "lsp": { "component": "lsp", "command": ["$PREFIX/bin/python3", "-m", "pylsp"] },
   "run": { "file": "python3 {file}" },
   "syntax": { "keywords": ["def", "class", "import", "from", "return", "…"], "lineComment": "#", "stringDelimiters": ["\"", "'", "\"\"\"", "'''"] }
 }
@@ -303,9 +352,15 @@ These show intent. Exact Termux package names and flags get confirmed against th
   "id": "rust",
   "name": "Rust",
   "languages": [ { "languageId": "rust", "extensions": ["rs"], "filenames": ["Cargo.toml"] } ],
-  "termux": { "packages": ["rust", "rust-analyzer"] },
-  "verify": { "command": ["$PREFIX/bin/rustc", "--version"], "expect": "rustc" },
-  "lsp": { "command": ["$PREFIX/bin/rust-analyzer"] },
+  "components": [
+    { "id": "toolchain", "name": "Compiler & Cargo", "required": true,
+      "packages": ["rust"],
+      "verify": { "command": ["$PREFIX/bin/rustc", "--version"], "expect": "rustc" } },
+    { "id": "lsp", "name": "Language server (rust-analyzer)", "default": true,
+      "description": "Autocomplete, errors, go-to-definition",
+      "packages": ["rust-analyzer"] }
+  ],
+  "lsp": { "component": "lsp", "command": ["$PREFIX/bin/rust-analyzer"] },
   "run": {
     "file": "rustc {file} -o $TMPDIR/{stem} && $TMPDIR/{stem}",
     "project": { "detect": "Cargo.toml", "command": "cargo run" }
@@ -316,7 +371,32 @@ These show intent. Exact Termux package names and flags get confirmed against th
 
 ---
 
-## 7. App-side changes
+## 7. Automatic updates
+
+Set up once, then everything stays current with no action from you or the user. There are two
+kinds of update, and both are automatic:
+
+| What changes | Who publishes it | How it reaches users |
+|---|---|---|
+| **Manifest** (new language, new optional component, fixed LSP flags, new keywords) | You push JSON to `KodrixMarketplace` | App re-fetches `index.json` + installed packs' manifests on launch and every 24 h. Takes effect instantly: no download, no app update. |
+| **Toolchain** (e.g. Termux ships a newer Rust) | Termux, automatically | Same background check compares installed package versions against the Termux index. |
+
+**Update flow for a toolchain:**
+1. A background job (Android `WorkManager`, daily, Wi-Fi + charging by default) fetches the
+   Termux index and diffs it against the install database (§5 step 8).
+2. The Languages panel shows an **Update** badge (e.g. "Rust 1.82 → 1.83, 45 MB").
+3. Depending on the user's setting: **Auto-install on Wi-Fi** (default) or **Ask me first**.
+4. **Safe swap:** new packages install into a staging area, run each component's `verify`,
+   and only then replace the old files. If `verify` fails, the update is discarded and the
+   working version stays. A broken upstream update can never leave a user with a dead language.
+
+**Your one-time setup:** create the `languages/` folder in `KodrixMarketplace` with `index.json`
+and one manifest per language. After that, adding a language = pushing one JSON file, and
+toolchain updates flow from Termux with no work on your side.
+
+---
+
+## 8. App-side changes
 
 | Today | Becomes |
 |---|---|
@@ -325,7 +405,8 @@ These show intent. Exact Termux package names and flags get confirmed against th
 | `startNativeLsp()` `when (langId)` branches | one path: resolve pack → run `lsp.prepare` hook → substitute variables → `launchLspClient()` (existing, unchanged) with `LD_PRELOAD` + pack `env` |
 | `installCppToolchain()`, `installPythonInBackground()`, `installPylspIfNeeded()` | `LanguagePackManager.install(packId)` → `TermuxPackageManager` |
 | "File opened → auto-install toolchain" | kept, but generic: opening an `.rs` file with Rust not installed shows "Install Rust support?" pointing at the panel |
-| n/a | new **Languages** sidebar mode: catalog from `index.json`, installed/update badges, size before install, progress (reusing `BinaryManager`'s notification helpers), uninstall |
+| n/a | new **Languages** sidebar mode: catalog from `index.json`; install dialog with component checkboxes and live sizes; progress (reusing `BinaryManager`'s notification helpers); add/remove components later; update badges; uninstall |
+| n/a | `LanguageUpdateWorker` (WorkManager) for the daily manifest + toolchain update check (§7) |
 
 Out of scope, unchanged: Node and Git stay bundled in the APK (`libnode_bin.so`, `libgit_bin.so`)
 and managed by `BinaryManager`/`WrapperManager`; the Open VSX extension marketplace
@@ -333,7 +414,7 @@ and managed by `BinaryManager`/`WrapperManager`; the Open VSX extension marketpl
 
 ---
 
-## 8. Migration of existing languages
+## 9. Migration of existing languages
 
 - **C / C++:** existing installs live in `filesDir/versions/clang/<ver>/`. On first launch after
   the update, treat them as "not installed" and offer a one-tap reinstall into the shared prefix,
@@ -347,7 +428,7 @@ and managed by `BinaryManager`/`WrapperManager`; the Open VSX extension marketpl
 
 ---
 
-## 9. Security
+## 10. Security
 
 - Every `.deb` is SHA256-verified against the Termux index, a new protection vs. today.
 - Manifests define commands that run on users' devices (`postInstall`, `lsp`, `run`), so **anyone who
@@ -360,19 +441,20 @@ and managed by `BinaryManager`/`WrapperManager`; the Open VSX extension marketpl
 
 ---
 
-## 10. Phased plan
+## 11. Phased plan
 
 | Phase | Deliverable | Exit criterion |
 |---|---|---|
 | **0 — Execution spike** | `libkodrix-exec.so` (execve→linker64, shebang handling, Termux path remap) + `LD_PRELOAD` in terminal/LSP launch | On a real Android 10+ device: Termux `clangd --version` and `python3 -c 'print(1)'` run from `filesDir`. **Go/no-go gate.** Also confirms (and likely fixes) today's C/C++ breakage. |
 | **1 — TermuxPackageManager** | index fetch/parse, dependency resolver, SHA256-verified download, extract, path fixups, install DB, uninstall with refcounts | Installs `clang` with deps resolved automatically (no hand list); uninstall removes exactly what it added. |
 | **2 — Packs + generic engine** | manifest schema + `LanguagePackManager`, generic LSP launcher / run / highlighter; migrate **C/C++** | C/C++ works end-to-end from `c-cpp.json` with the old `when` branches deleted. |
-| **3 — Languages panel** | sidebar UI: browse, sizes, install progress, uninstall, updates | User installs C/C++ from the panel with no file-open trigger. |
+| **3 — Languages panel** | sidebar UI: browse, install dialog with component checkboxes + sizes, progress, add/remove components, uninstall | User installs C/C++ from the panel with no file-open trigger, and adds/removes an optional component afterwards. |
 | **4 — Prove extensibility** | migrate **Python** to Termux; add **Rust** purely by pushing `rust.json` | Rust works on a device **without an app update**. |
+| **5 — Auto-updates** | `LanguageUpdateWorker`, update badges, auto/ask setting, staged install + `verify` rollback | Editing a manifest on `KodrixMarketplace` shows up in the app without an update; a simulated failing toolchain update rolls back cleanly. |
 
 ---
 
-## 11. Open questions for you
+## 12. Open questions for you
 
 1. **Test devices:** what Android versions/phones can you test Phase 0 on? That gate needs a real device.
 2. **Python version cadence:** moving to Termux means Python follows Termux's version (currently

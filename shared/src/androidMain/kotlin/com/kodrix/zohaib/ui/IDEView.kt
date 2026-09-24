@@ -25,7 +25,6 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.border
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.text.TextStyle
-import androidx.compose.material3.TabRowDefaults.tabIndicatorOffset
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.ui.zIndex
@@ -45,7 +44,6 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.DialogProperties
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.kodrix.zohaib.viewmodel.TerminalViewModel
-import com.kodrix.zohaib.ai.AgentRole
 import coil.compose.AsyncImage
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -343,9 +341,7 @@ fun AIChatContent(viewModel: TerminalViewModel) {
     
     var attachedFileUri by remember { mutableStateOf<android.net.Uri?>(null) }
     
-    val isAgentMode by viewModel.agentOrchestrator.isAgentMode.collectAsState()
-    val orchestratorState by viewModel.agentOrchestrator.orchestratorState.collectAsState()
-    val pendingQuestion by viewModel.agentOrchestrator.pendingQuestion.collectAsState()
+    val isAgentMode by viewModel.isAgentMode.collectAsState()
     
     val context = LocalContext.current
     val filePickerLauncher = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
@@ -396,7 +392,7 @@ fun AIChatContent(viewModel: TerminalViewModel) {
             Spacer(Modifier.width(8.dp))
             androidx.compose.material3.Switch(
                 checked = isAgentMode,
-                onCheckedChange = { viewModel.agentOrchestrator.toggleAgentMode(it) },
+                onCheckedChange = { viewModel.toggleAgentMode(it) },
                 modifier = Modifier.scale(0.7f * uiScale),
                 colors = androidx.compose.material3.SwitchDefaults.colors(
                     checkedThumbColor = Color.White,
@@ -405,25 +401,6 @@ fun AIChatContent(viewModel: TerminalViewModel) {
                     uncheckedTrackColor = Color(0xFF30363D)
                 )
             )
-            if (isAgentMode) {
-                Spacer(Modifier.width(12.dp))
-                val isFastMode by viewModel.agentOrchestrator.isFastMode.collectAsState()
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text("FAST", color = if (isFastMode) Color(0xFFD29922) else Color.Gray, fontSize = (9 * uiScale).sp, fontWeight = FontWeight.Bold)
-                    Spacer(Modifier.width(4.dp))
-                    androidx.compose.material3.Switch(
-                        checked = isFastMode,
-                        onCheckedChange = { viewModel.agentOrchestrator.toggleFastMode(it) },
-                        modifier = Modifier.scale(0.6f * uiScale),
-                        colors = androidx.compose.material3.SwitchDefaults.colors(
-                            checkedThumbColor = Color.White,
-                            checkedTrackColor = Color(0xFFD29922),
-                            uncheckedThumbColor = Color.Gray,
-                            uncheckedTrackColor = Color(0xFF30363D)
-                        )
-                    )
-                }
-            }
             Spacer(Modifier.weight(1f))
             Box {
                 IconButton(onClick = { showHistoryMenu = true }, modifier = Modifier.size((24 * uiScale).dp)) {
@@ -466,7 +443,7 @@ fun AIChatContent(viewModel: TerminalViewModel) {
                 }
             }
             Spacer(Modifier.width(8.dp))
-            IconButton(onClick = { if (isAgentMode) viewModel.agentOrchestrator.stopLoop() else viewModel.clearAiChat() }, modifier = Modifier.size((28 * uiScale).dp)) {
+            IconButton(onClick = { if (isAgentMode) viewModel.autoAgent.stop() else viewModel.clearAiChat() }, modifier = Modifier.size((28 * uiScale).dp)) {
                 Icon(if (isAgentMode) Icons.Default.AddCircleOutline else Icons.Default.Refresh, "New", tint = Color.Gray, modifier = Modifier.size((18 * uiScale).dp))
             }
             Spacer(Modifier.width(4.dp))
@@ -477,9 +454,6 @@ fun AIChatContent(viewModel: TerminalViewModel) {
         Spacer(Modifier.height(8.dp))
 
         if (isAgentMode) {
-            val agentWorkspaces by viewModel.agentOrchestrator.workspaces.collectAsState()
-            val activeRole by viewModel.agentOrchestrator.activeRole.collectAsState()
-
             // Poll the agent server's health + wire the tool context for the
             // current project. The tool context is what the agent uses when
             // it calls read_file / write_file / run_shell etc.
@@ -510,42 +484,11 @@ fun AIChatContent(viewModel: TerminalViewModel) {
                 if (ctx != null) viewModelRef.autoAgent.setToolContext(ctx)
             }
 
-            // Tab Row for Agents
-            ScrollableTabRow(
-                selectedTabIndex = activeRole.ordinal,
-                containerColor = Color(0xFF161B22),
-                contentColor = Color(0xFF58A6FF),
-                edgePadding = 0.dp,
-                divider = {},
-                indicator = { tabPositions ->
-                    TabRowDefaults.SecondaryIndicator(
-                        Modifier.tabIndicatorOffset(tabPositions[activeRole.ordinal]),
-                        color = Color(0xFF58A6FF)
-                    )
-                },
-                modifier = Modifier.fillMaxWidth().height((36 * uiScale).dp)
-            ) {
-                AgentRole.values().forEach { role ->
-                    Tab(
-                        selected = activeRole == role,
-                        onClick = { viewModel.agentOrchestrator.setActiveRole(role) },
-                        text = {
-                            Text(
-                                role.name.take(3),
-                                fontSize = (10 * uiScale).sp,
-                                fontWeight = if (activeRole == role) FontWeight.Bold else FontWeight.Normal
-                            )
-                        }
-                    )
-                }
-            }
-
-            // The new Hermes-style agent panel replaces the old multi-agent
-            // markdown workspace. It talks to the same spawned agent server
-            // and exposes: chat + auto-run + tool approval + status.
+            // The Hermes-style agent panel: chat + auto-run + tool approval + status.
+            val serverHealthy by viewModelRef.agentServerHealthy.collectAsState()
             com.kodrix.zohaib.ui.AgentPanel(
                 agent = viewModel.autoAgent,
-                serverHealthy = viewModel.agentServerHealthy.value,
+                serverHealthy = serverHealthy,
                 modifier = Modifier.weight(1f).fillMaxWidth(),
             )
         } else {

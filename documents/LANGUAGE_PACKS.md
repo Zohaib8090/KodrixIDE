@@ -1,467 +1,413 @@
-# Language Packs — Design
+# Language Packs — Design (v2)
 
-**Status:** Draft for review. No code written yet.
-**Goal:** Adding a programming language to Kodrix should mean pushing a JSON file to
-`KodrixMarketplace`, not shipping a new APK. The user opens a **Languages** side panel,
-taps **Install** on a language, and can immediately edit (highlighting + LSP) and run code in it.
-**Toolchain source (decided):** Termux packages only.
+**Status:** Draft for implementation. Phase 0 (spike) must pass before any other work starts.
+**Audience:** the engineer/agent implementing this. Sections are written so each phase can be executed independently once its predecessor's acceptance criteria are met.
 
-> **No Termux app required.** "Termux packages" means Kodrix itself downloads the prebuilt
-> package files (`.deb`) that Termux publishes on its public package servers, and unpacks them
-> into Kodrix's own storage. The user never installs or sees Termux. The C/C++ toolchain install
-> already works this way today (`TerminalViewModel.kt:1056`).
+> **Verified against the live Termux index on 2026-09-24.** Facts marked **[verified]** were
+> checked against `packages-cf.termux.dev/apt/termux-main/dists/stable/main/binary-aarch64/Packages`
+> (3,002 packages) and the actual `clang_21.1.8-3_aarch64.deb`.
 
-**User experience in one line:** open the **Languages** panel → pick a language → tick the
-optional parts you want (language server, extra tools) → **Install** → it just works, and
-keeps itself updated.
+## 0. Goal
+
+Adding a programming language to Kodrix = pushing a JSON manifest to `KodrixMarketplace`. No new APK.
+
+User flow: open **Languages** panel → pick a language → tick optional parts (language server, extra tools) → **Install** → highlighting, LSP and Run work immediately → the pack keeps itself updated.
+
+**Toolchain source (decided):** Termux packages only. Kodrix downloads the prebuilt `.deb` files Termux publishes and unpacks them into its own storage. The Termux app is never required or visible to the user.
+
+### Non-goals (v1)
+- Debuggers (DAP), formatters beyond what the LSP offers, notebook kernels.
+- Languages not available as Termux packages.
+- Running on Android < 10 differently from Android 10+ (same code path; see Phase 0).
+- User-authored packs from arbitrary URLs (only the official marketplace repo in v1).
 
 ---
 
-## 1. How languages work today
+## 1. Current state (unchanged facts)
 
-Each language is hand-wired into Kotlin in five places:
+Each language is hand-wired in five places:
 
 | Concern | Where | What's hardcoded |
 |---|---|---|
 | Extension → language | `TerminalViewModel.kt:506` `getLanguageId()` | `"py" -> "python"`, `"cpp" -> "cpp"`, … |
 | Syntax highlighting | `SyntaxHighlighter.kt:17` | `when (extension)` → built-in keyword lists |
-| Language server launch | `TerminalViewModel.kt:800–874` `startNativeLsp()` | one `when (langId)` branch per language, each building its own shell command and env |
-| Installer | `TerminalViewModel.kt:1037` `installCppToolchain()`; `:3819` `installPythonInBackground()`; `:1312` `installPylspIfNeeded()` | a bespoke function per language |
-| Friendly names, run commands | `TerminalViewModel.kt:894`, run panel | per-language strings |
+| LSP launch | `TerminalViewModel.kt:800–874` `startNativeLsp()` | one `when (langId)` branch per language |
+| Installer | `TerminalViewModel.kt:1037` `installCppToolchain()`; `:3819` `installPythonInBackground()`; `:1312` `installPylspIfNeeded()` | bespoke function per language |
+| Names, run commands | `TerminalViewModel.kt:894`, run panel | per-language strings |
 
-The existing marketplace (`MARKETPLACE_ARCHITECTURE.md`, `marketplace/python-support/manifest.json`)
-only describes *metadata* (name, description, icon). None of the behaviour above is data-driven,
-which is why adding a language currently requires reprogramming the app.
+The existing marketplace (`MARKETPLACE_ARCHITECTURE.md`, `marketplace/python-support/manifest.json`) only carries metadata (name, description, icon). No behaviour is data-driven.
 
 ---
 
-## 2. Hard constraints found during investigation
+## 2. Hard constraints
 
-These decide the design. **Constraint A is the big one.**
+### A. Android will not `execve()` downloaded binaries (W^X) — the gating constraint
 
-### A. Android won't execute binaries the app downloads (W^X)
+`androidApp/build.gradle.kts` has `targetSdk = 34`. On API 29+ with targetSdk > 28, SELinux denies `execute_no_trans` on files in the app's data dir. Only binaries inside the APK (`nativeLibraryDir`, e.g. `libnode_bin.so`, `libgit_bin.so`) can be exec'd. Downloaded Termux binaries live in `filesDir`.
 
-`androidApp/build.gradle.kts` sets `targetSdk = 34`. Since Android 10, apps targeting API 29+
-cannot `execve()` files in their own writable data directory — SELinux denies it. Only binaries
-shipped **inside the APK** (extracted to `nativeLibraryDir`) are executable. That's why Node and
-Git ship as `libnode_bin.so` / `libgit_bin.so` in `jniLibs/`.
+Evidence in the repo:
+- `WrapperManager.kt:145` and `TerminalViewModel.kt:833` exec downloaded binaries directly (`exec "<filesDir>/versions/…/clangd"`).
+- `TerminalViewModel.kt:1184` skips the clang version check because clang "cannot self-execute inside the Android app sandbox" — this is the restriction, and the skip masks it.
+- `native-lib.cpp` has the standard workaround (run via `/system/bin/linker64 <binary> args…`; the linker `mmap`s the file, which SELinux allows) but only for `node` (`:263`), and the hooks are active only "when LD_PRELOADed" (`:83`). **Nothing sets `LD_PRELOAD`. The hooks are dormant.**
 
-Termux packages are *downloaded*, so they live in `filesDir` and hit this wall. What the code does today:
+**Consequence:** the current on-demand C/C++ toolchain probably does not run on Android 10+ today. Unconfirmed — confirm in Phase 0.
 
-- `WrapperManager.kt:145` and `TerminalViewModel.kt:833` launch downloaded binaries directly
-  (`exec "<filesDir>/versions/…/clangd"`).
-- `TerminalViewModel.kt:1184` notes that Clang "cannot self-execute inside the Android app
-  sandbox", so the install skips the version check to avoid rolling itself back. That is this
-  restriction showing up.
-- `native-lib.cpp` already contains the standard workaround: run the binary *through the system
-  linker*, as in `execve("/system/bin/linker64", [linker64, binary, args…])`. The linker maps the
-  file instead of `exec`-ing it, which SELinux allows. But it only does this for `node`
-  (`native-lib.cpp:263`). The whole hook library is also only active "when LD_PRELOADed"
-  (`native-lib.cpp:83`), and **nothing in the repo sets `LD_PRELOAD`**. The hooks are dormant.
+**Why wrapper scripts are not enough:** a `#!/system/bin/sh` wrapper still needs the *kernel* to exec the script file itself, which SELinux denies for the same reason. Any child process (clang → `ld.lld`, pip → python, `make` → `cc`) calls `execve` on a path in `filesDir`. So the fix must intercept exec in every process, or avoid the restriction entirely (options in §5).
 
-**Consequence:** the current on-demand C/C++ toolchain (clangd LSP, clang) most likely does **not**
-run on Android 10+ devices today. This needs confirming on a real device (I couldn't run one from
-the cloud session). It's also the first thing the Language Pack system must solve, since every
-Termux-based language depends on it.
+### B. Termux binaries hardcode Termux's prefix
 
-### B. Termux binaries have Termux's install path baked in
+Prefix is `/data/data/com.termux/files/usr` (31 chars up to `usr`). It is baked into RUNPATH, shebangs, `python` sysconfig, clang's default include/resource/sysroot paths, pip-generated scripts, and text config. Kodrix's prefix (`/data/data/com.kodrix.zohaib/files/…`) is longer, so binary in-place patching is not generally possible.
 
-Termux packages are built for the prefix `/data/data/com.termux/files/usr`. That path is compiled
-into binaries (library search path `RUNPATH`, default config/include paths), shebang lines
-(`#!/data/data/com.termux/files/usr/bin/python3`), and text files. Kodrix's own path
-(`/data/data/com.kodrix.zohaib/files/…`) is *longer*, so it can't be patched in-place inside
-binaries.
+Approach, in order of preference:
+1. **Runtime path redirect** in the preload library (`open/openat/stat/lstat/access/readlink/opendir/execve/realpath…` mapping `/data/data/com.termux/files` → Kodrix files dir). `native-lib.cpp:182` already does part of this.
+   **Redirect target:** with per-pack envs (§5.1) there is no single Kodrix prefix. The redirect must map to the env of the binary that is running. Record it at exec-rewrite time (an env var set by ExecProxy alongside the `/proc/self/exe` fix, §2.F), not a global constant.
+2. **Environment** to avoid patching: `LD_LIBRARY_PATH` (searched before RUNPATH), `PYTHONHOME`, `SSL_CERT_FILE`, `TMPDIR`, `HOME`, `PATH`.
+3. **Install-time text rewrite** only for shebangs and small text config files (safe, length doesn't matter in text).
+4. Do **not** rely on `patch_elf.js`. Its `$ORIGIN/./././…` padding is wrong for executables in `usr/bin/` (needs `$ORIGIN/../lib`). Keep it only as a fallback experiment.
 
-- `patch_elf.js` (repo root) already handles the library path by replacing it with a
-  same-length `$ORIGIN/./././…`. **Caveat:** `$ORIGIN` is the directory of the file being loaded,
-  so that replacement is correct for libraries in `usr/lib/` but points executables in `usr/bin/`
-  at `usr/bin/`, which is wrong. Executables need `$ORIGIN/../lib`, padded to the same length.
-- `native-lib.cpp:182` already has a runtime redirect from `…/com.termux/files` to the Kodrix
-  files dir for `open`/`stat`/`access`, which is dormant for the same `LD_PRELOAD` reason.
+### C. Pinned Termux URLs break — **already broken [verified]**
 
-### C. Pinned Termux URLs will break
+`installCppToolchain()` hardcodes 7 exact URLs (`clang_21.1.8-2_…deb`, …). Termux's main repo serves essentially only current builds.
 
-`installCppToolchain()` downloads 7 hand-listed URLs with exact versions
-(`clang_21.1.8-2_…deb`, `libllvm_21.1.8-2_…`, …). Termux's main repo generally serves only the
-**current** build of each package. When Termux bumps clang, those URLs 404 and C/C++ install breaks
-for every user. The fix is to resolve packages from Termux's `Packages` index at install time.
+**As of 2026-09-24, 6 of the 7 URLs return HTTP 404** (Termux moved to `clang 21.1.8-3`; only `zstd_1.5.7-1` still resolves). **C/C++ install is currently broken for every user**, independent of constraint A. The hand list was also incomplete: Termux's `clang` depends on `lld`, `llvm` and `libcompiler-rt`, none of which were downloaded, so linking could never have worked.
 
-### D. Dependencies are resolved by hand
+Packages must be resolved from the repo's `Packages` index at install time.
 
-The same function lists clang's dependencies manually (libllvm, libffi, zstd, libxml2, liblzma,
-ndk-sysroot). Termux's `Packages` index already declares `Depends:` for every package, so a
-resolver makes this automatic and correct for any language.
+### D. Dependencies are listed by hand
 
-### E. Python doesn't come from Termux today
+The `Packages` index declares `Depends:` for everything. A resolver replaces all hand-written lists.
 
-Python 3.13.13 is a self-hosted zip on `KodrixMarketplace` releases (`TerminalViewModel.kt:3822`).
-With the Termux-only decision, Python moves to Termux's `python` + `python-pip` packages (§9).
+**Measured closures [verified, aarch64]:**
+
+| Roots | Packages | Download | Installed |
+|---|---|---|---|
+| `python`, `python-pip` | 18 | 11 MB | 53 MB |
+| `clang`, `ndk-sysroot` | 15 | 87 MB | 518 MB |
+
+`rust` (125 MB alone) and `golang` both depend on `clang`, so large dependencies are shared across packs. The content-addressed store (§5.1) must dedupe them.
+
+### E. Python is self-hosted today
+
+Python 3.13.13 is a zip on `KodrixMarketplace` releases (`TerminalViewModel.kt:3822`). With the Termux-only decision it moves to Termux's `python` + `python-pip` (see Phase 6). Termux currently ships **Python 3.14.6 [verified]**.
+
+### F. Other exec-adjacent gotchas (new)
+- Shebang scripts go through kernel `execve` → blocked; the hook must parse the shebang and re-dispatch through `linker64 <interpreter> <script>`.
+- Under `linker64`, `/proc/self/exe` points at the linker, not the binary. Python, clang, and lld use it to locate their prefix/resource dir. The hook must set/emulate this (termux-exec does the same via extra env vars; study it). Concretely: when rewriting an exec, put the real binary path in an env var and hook `readlink`/`readlinkat` on `/proc/self/exe` to return it.
+- bionic's `execvp`/`posix_spawn` may call `execve` internally without going through the PLT, so hook **all** of: `execve, execv, execvp, execvpe, fexecve, posix_spawn, posix_spawnp`. LLVM tools (clang → `ld.lld`) spawn children via `posix_spawn`. Statically linked binaries (e.g. Go) bypass `LD_PRELOAD` entirely, **and cannot be launched through `linker64` either** (the linker only loads dynamic executables); note as a known limitation.
+- Downloaded `.so` files can be `dlopen`ed/`mmap`ed executable from `filesDir` (only `execute_no_trans` is denied), so libraries are fine.
+- Use `/system/bin/linker64` on 64-bit ABIs, `/system/bin/linker` on 32-bit.
 
 ---
 
 ## 3. Architecture overview
 
 ```
-KodrixMarketplace repo                         Kodrix app
-──────────────────────                         ──────────
-languages/index.json  ──fetch──►  LanguagePackManager ──► Languages side panel (browse/install/uninstall)
-languages/<id>.json   ──fetch──►        │
-                                        ▼
-Termux mirror                   TermuxPackageManager
-dists/stable/main/              (resolve deps from Packages index → download .deb →
-  binary-<arch>/Packages ─────►  verify SHA256 → extract → fix paths → record files)
-pool/…/*.deb            ─────►          │
-                                        ▼
-                                shared prefix:  filesDir/termux/usr/{bin,lib,include,share,etc}
-                                        │
-                                        ▼
-                         Execution layer: libkodrix-exec.so (LD_PRELOAD, shipped in APK)
-                         rewrites every exec of a filesDir binary → /system/bin/linker64 <binary>
-                                        │
-                  ┌─────────────────────┼──────────────────────┐
-                  ▼                     ▼                      ▼
-         Generic LSP launcher   Generic Run command    Generic syntax highlighter
-         (manifest.lsp)         (manifest.run)         (manifest.syntax)
+Marketplace JSON (pack manifest)
+        │
+        ▼
+ PackManager ──► PackageResolver ──► TermuxRepoClient (Packages index, .deb download, SHA256)
+        │                                   │
+        │                                   ▼
+        │                          DebExtractor → versioned dir
+        ▼
+ Runtime (ExecProxy preload lib + env builder + path redirect)
+        │
+        ├── HighlightService (grammar by ext)
+        ├── LspService  (launch template → process)
+        └── RunService  (run/build templates → terminal)
 ```
 
-Four new pieces, each replacing hardcoded logic:
+Everything language-specific is data in the manifest; Kotlin knows nothing about "python" or "cpp".
 
-1. **Execution layer** (`libkodrix-exec.so`): makes downloaded binaries runnable. Solves constraint A.
-2. **`TermuxPackageManager`**: a small in-app `apt`, covering constraints B, C and D.
-3. **`LanguagePackManager` + manifests**: data-driven language definitions.
-4. **Languages panel**: the user-facing install UI.
+Suggested module boundaries (Kotlin, shared where possible; Android-only for exec):
+- `packs/PackManifest.kt` — schema + validation
+- `packs/TermuxRepoClient.kt` — index fetch/parse, mirrors
+- `packs/PackageResolver.kt` — dependency closure
+- `packs/DebExtractor.kt` — `ar` → `data.tar.xz` → files/symlinks
+- `packs/PackInstaller.kt` — orchestration, atomic switch, rollback, GC
+- `runtime/ExecProxy` (C++, extend `native-lib.cpp`) + `runtime/EnvBuilder.kt`
+- `ui/LanguagesPanel.kt`
 
 ---
 
-## 4. Execution layer (prerequisite for everything)
+## 4. Phase 0 — Feasibility spike (GATE)
 
-Generalise the dormant hooks in `native-lib.cpp` into a dedicated preload library, following
-Termux's own `termux-exec` "system linker exec" approach (check its license before reusing code):
+Goal: prove a downloaded Termux binary can run on a real device with `targetSdk = 34`. **Do not start Phase 1 until this passes.** Cloud sessions cannot do this; it needs a real device (Android 14, arm64) — an emulator is a secondary check only.
 
-- **Ship it in the APK** (`jniLibs/<abi>/libkodrix-exec.so`) so it lives in `nativeLibraryDir`
-  and is itself allowed to load.
-- **Hook `execve`** (plus `execv*` variants and `posix_spawn`, which bionic implements internally
-  and doesn't route through the hooked `execve`):
-  - ELF file under `filesDir`: rewrite to `/system/bin/linker64 <file> <args…>`
-    (`/system/bin/linker` on 32-bit).
-  - Script with a shebang under `filesDir`: read the `#!` line, remap the interpreter path
-    (Termux prefix → Kodrix prefix), and exec the interpreter through the linker the same way.
-  - Anything else: pass through unchanged.
-- **Hook path functions** (`open`, `openat`, `stat`, `lstat`, `access`, `readlink`, `opendir`, …):
-  remap `/data/data/com.termux/files` → Kodrix prefix. This extends `native-lib.cpp`'s existing
-  `do_redirect()`.
-- **Set `LD_PRELOAD`** everywhere a pack binary can start: the terminal shell env (PtyBridge
-  init), the LSP launcher, and the Run command. The library re-exports it to children, so
-  `cargo → rustc → clang → ld.lld` chains keep working.
+**Test device (decided):** the owner's Samsung phone, Android 14.
 
-**Known side effect of the linker trick:** `/proc/self/exe` points at `linker64`, not the real
-binary. Tools that find their own install location that way (Python's `sys.prefix`, clang's
-resource dir, rustc's sysroot, Go's `GOROOT`) need an explicit env var or flag instead. That's
-what the manifest `env` block is for (§6).
+Test matrix:
 
-**Phase 0 is a device spike of exactly this layer.** It's a go/no-go gate: if Termux clangd and
-python3 run from `filesDir` through it, the rest of the plan is straightforward engineering.
-
----
-
-## 5. TermuxPackageManager (in-app mini-apt)
-
-Replaces the hand-written download loop in `installCppToolchain()` with a general installer.
-
-1. **Index:** download and cache
-   `https://packages-cf.termux.dev/apt/termux-main/dists/stable/main/binary-<arch>/Packages`
-   (`<arch>` = `aarch64` / `arm` / `x86_64` / `i686`, reusing the existing ABI mapping at
-   `TerminalViewModel.kt:1048`). Parse the stanzas: `Package`, `Version`, `Depends`,
-   `Pre-Depends`, `Filename`, `Size`, `Installed-Size`, `SHA256`.
-2. **Resolve:** take the requested packages plus the transitive closure of `Depends`/`Pre-Depends`.
-   Handle alternatives (`a | b`: first one available) and version constraints. Skip packages
-   already installed at that version, plus an ignore-list of Termux-app plumbing that makes no
-   sense in Kodrix (`termux-exec`, `termux-tools`, `termux-am`, …).
-3. **Show size first:** sum `Size` (download) and `Installed-Size` so the panel can say
-   "Rust — 310 MB download, 1.1 GB installed" before the user commits.
-4. **Download + verify:** fetch each `.deb` from `Filename` and **check its SHA256 against the index**.
-   Today's installer has no integrity check at all. (Later hardening: verify the index's `InRelease`
-   GPG signature.)
-5. **Extract:** reuse `extractDataTarFromDeb()` and the pure-Java XZ path already in
-   `TerminalViewModel.kt:1129–1164`, stripping `./data/data/com.termux/files/` as today.
-   Also support `data.tar.gz`/`.zst` if encountered.
-6. **Install into one shared prefix**, `filesDir/termux/usr/`, the same layout as real Termux.
-   One shared prefix (rather than per-language folders like today's `versions/clang/21.1.8/`)
-   means shared libraries (`libc++`, `zlib`, `openssl`, …) are installed once, and cross-language
-   tool chains work naturally (e.g. a compiler invoking `clang` as its linker).
-7. **Fix paths after install:**
-   - Rewrite shebangs and text files containing the Termux prefix (text can grow in length).
-   - Library lookup: set `LD_LIBRARY_PATH=$PREFIX/lib` in every launch env (bionic searches it
-     before `RUNPATH`). Optionally also patch `RUNPATH` in-app per constraint B, using
-     `$ORIGIN/../lib` for executables.
-8. **Record ownership:** a small install database (`filesDir/termux/var/lib/kodrix/installed.json`)
-   mapping *package → version → files*, and *pack → packages*. That enables clean uninstall and
-   reference counting (don't delete `libllvm` while another installed pack still needs it) and
-   powers "update available" checks against the index.
-
----
-
-## 6. Language Pack manifest
-
-Hosted in `KodrixMarketplace` under a new `languages/` folder:
-
-```
-languages/
-  index.json          # catalog shown in the Languages panel
-  c-cpp.json
-  python.json
-  rust.json
-  icons/c-cpp.png …
-```
-
-### `index.json`
-
-```json
-{
-  "schema": 1,
-  "packs": [
-    { "id": "c-cpp",  "name": "C / C++", "summary": "Clang compiler + clangd", "icon": "icons/c-cpp.png",  "manifest": "c-cpp.json" },
-    { "id": "python", "name": "Python",  "summary": "Python 3 + pip + pylsp",  "icon": "icons/python.png", "manifest": "python.json" },
-    { "id": "rust",   "name": "Rust",    "summary": "rustc, Cargo, rust-analyzer", "icon": "icons/rust.png", "manifest": "rust.json" }
-  ]
-}
-```
-
-### Pack manifest fields
-
-| Field | Required | Meaning |
+| # | Test | Pass |
 |---|---|---|
-| `schema` | ✓ | Manifest format version. The app hides packs with a newer schema than it understands and says "Update Kodrix to install this language". |
-| `id`, `name`, `description`, `icon` | ✓ | Identity + display. |
-| `languages[]` | ✓ | `{ languageId, extensions[], filenames[] }`: which files this pack handles (e.g. `filenames: ["Cargo.toml"]`). Replaces `getLanguageId()`. |
-| `components[]` | ✓ | The installable parts of the language, shown as checkboxes in the install dialog (see "Components" below). |
-| `ignoreDeps[]` | | Pack-specific extra ignore-list entries for the dependency resolver. |
-| `requiresPacks[]` | | Other packs that must be installed first (e.g. a pack whose pip packages need `c-cpp` to build native extensions). |
-| `env{}` | | Env vars for everything this pack launches, e.g. `PYTHONHOME`, `CPATH`. Supports the variables below. |
-| `lsp` | | `{ component, command[], initializationOptions{}, prepare }`: how to start the language server over stdio. Only active if `component` is installed. `prepare` names a built-in Kotlin hook (see below). |
-| `run` | | `{ file, project: { detect, command } }`: templates for the Run button. `file` runs the current file; `project` applies when a marker file like `Cargo.toml` exists. |
-| `syntax` | | `{ keywords[], types[], constants[], lineComment, blockComment[2], stringDelimiters[] }`: fed to a generic highlighter replacing `SyntaxHighlighter.kt`'s per-language lists. (TextMate grammars could replace this later.) |
+| 1 | Download + extract Termux `python` and deps manually; run `/system/bin/linker64 <prefix>/bin/python3.14 -c "print(1)"` | prints `1` |
+| 2 | Same for `clang --version` | prints version |
+| 3 | Compile+link+run hello world (`clang` → `ld.lld` child exec) | binary runs |
+| 4 | `python3 -c "import subprocess; subprocess.run(['<prefix>/bin/python3','-c','print(2)'])"` (child exec) | prints `2` |
+| 5 | A `#!` script in `<prefix>/bin` executes | runs |
+| 6 | `pip --version`, `python -c "import sysconfig; print(sysconfig.get_paths())"` show Kodrix paths or redirect correctly | no `com.termux` leakage that breaks behaviour |
 
-**Variables** available in `env`, `lsp`, `run`, `postInstall`, `verify`:
-`$PREFIX` (`filesDir/termux/usr`), `$HOME`, `$TMPDIR`, `{file}`, `{dir}`, `{stem}`, `{project}`.
+Also run a **baseline** of tests 1–2 with a plain `execve` (no linker, no preload) to confirm constraint A on the device rather than assume it.
 
-### Components (optional parts)
+Steps: (a) wire `LD_PRELOAD` (from `nativeLibraryDir`) into the terminal/LSP process env, (b) generalise the exec hook from `node`-only to "any ELF under a pack prefix", (c) add shebang handling and the `/proc/self/exe` fix, (d) rerun the matrix.
 
-Every language is split into **components**. The install dialog shows them as checkboxes:
+**Fallbacks if it fails or proves too leaky — try in this order (decided, since distribution is GitHub/F-Droid only, §12):**
+1. `targetSdk = 28` — direct `execve` works again (this is what Termux itself does). Cheapest option, and now allowed because Play Store is out of scope. Downsides: Android may raise the minimum installable targetSdk in future, and it forfeits some newer platform behaviours. If chosen, ExecProxy is still needed for path redirect (constraint B) but no longer for exec interception.
+2. `proot`-style ptrace exec interception — robust and handles static binaries, but slower.
+3. Rebuild the needed Termux packages with Kodrix's own prefix via `termux-packages` in GitHub Actions and host the repo. Eliminates constraint B, but breaks "upstream Termux only" and adds a maintained build pipeline.
+
+Phase 0 should test the ExecProxy approach first (it keeps `targetSdk = 34`), and fall through this list only on failure.
+
+Deliverable: a short `SPIKE_RESULTS.md` with the matrix results per device/Android version and the chosen path.
+
+---
+
+## 5. Phase 1 — Runtime layer
+
+### 5.1 On-disk layout
 
 ```
-┌─ Install Rust ─────────────────────────────────────────┐
-│ ☑ Compiler & Cargo            required     180 MB      │
-│ ☑ Language server             recommended   40 MB      │
-│   (autocomplete, errors, go-to-definition)             │
-│ ☐ Formatter & linter          optional      15 MB      │
-│   (rustfmt, clippy)                                    │
-│                                                        │
-│ Total: 220 MB download · 780 MB on device              │
-│                          [ Cancel ]  [ Install ]       │
-└────────────────────────────────────────────────────────┘
+<filesDir>/packs/
+  store/<pkgname>/<version>/…        # extracted package contents (immutable)
+  envs/<pack-id>/<pack-version>/     # merged prefix for a pack (symlink farm or copy)
+  envs/<pack-id>/current -> …        # atomic switch
+  lock/<pack-id>.lock.json           # resolved names+versions+sha256
+  cache/debs/                        # downloaded .debs (evictable)
+  index/<arch>/Packages(.json)       # cached repo index + timestamp
 ```
 
-Component fields:
+Rationale: a versioned, immutable store + a switchable `current` link gives atomic install/upgrade and one-step rollback.
 
-| Field | Meaning |
-|---|---|
-| `id`, `name`, `description` | Identity + the text under the checkbox. |
-| `required` | `true` = always installed, checkbox locked on. |
-| `default` | Pre-ticked in the dialog (for "recommended" parts like the LSP). |
-| `packages[]` | Termux packages for this component. Dependencies are resolved automatically and shared between components (installed once). |
-| `postInstall[][]` | Commands run once after this component installs, as **argv arrays, not shell strings** (e.g. `pip install python-lsp-server`). |
-| `verify` | `{ command[], expect }`: smoke test after install; the component is marked failed (and rolled back) if the output doesn't contain `expect`. |
+**Writable areas:** some components install files after extraction (e.g. `pip install` for the Python LSP, §7). Those writes must not land in the immutable `store/` through a symlink. Give each env a real, writable overlay directory (e.g. `envs/<pack>/<ver>/local/`, used via `pip install --prefix ${prefix}/local` or `PYTHONUSERBASE`), and include it in `PATH`/`PYTHONPATH` via EnvBuilder.
 
-After install, the language's panel entry keeps showing the components, so the user can add
-or remove any optional part later (e.g. install the LSP next week without reinstalling Rust).
-Sizes are computed live from the Termux index (`Size` / `Installed-Size`), never hardcoded.
+### 5.2 ExecProxy (native)
+- Built into `libkodrix_exec.so`, shipped in `jniLibs/`, set via `LD_PRELOAD` for **every** process Kodrix spawns (terminal, LSP, run, build). Preloaded value is inherited by children through the environment; the hook must re-inject it if a child clears env.
+- Behaviour on exec of path `P`:
+  1. Apply path redirect (`com.termux` → Kodrix prefix).
+  2. If `P` is inside `<filesDir>` and is an ELF → `execve(linker, [linker, P, args…], env)`.
+  3. If `P` starts with `#!` → parse interpreter (+ one optional arg), rewrite it via redirect, recurse.
+  4. Otherwise pass through.
+- Set `/proc/self/exe`-dependent env vars the packages need (per the Phase 0 findings).
+- Must be async-signal-safe between `fork` and `exec` (no malloc in the hook's fast path where avoidable).
 
-**Built-in hooks (`lsp.prepare`).** Some language smarts don't fit in JSON. Today's
-`ensureCompileCommands()` (`TerminalViewModel.kt:967`) generates `compile_commands.json` so clangd
-resolves project includes. Rather than scripting that in JSON, it stays in Kotlin as a named hook
-(`"prepare": "compile-commands"`) that any manifest can opt into. New hooks need an app update,
-but new *languages* don't.
+### 5.3 EnvBuilder
+Produces the env for any process from the manifest + resolved prefix: `PATH`, `LD_LIBRARY_PATH`, `LD_PRELOAD`, `HOME`, `TMPDIR`, `PREFIX`, `SSL_CERT_FILE`, plus pack-specific `env` from the manifest (template-expanded). Single source of truth; replaces per-language env code in `startNativeLsp()`.
 
-### Examples
+---
 
-These show intent. Exact Termux package names and flags get confirmed against the live index in Phase 1.
+## 6. Phase 2 — Package manager
 
-**C / C++**: replaces `installCppToolchain()` and the C++ branch of `startNativeLsp()`:
+### 6.1 Repo client
+- Source: Termux main repo `Packages` index for the device ABI (`aarch64`, `arm`, `x86_64`, `i686`), plus a configured mirror list with fallback. Fetch on install and refresh at most every 24 h; cache locally. (The aarch64 index is ~1.9 MB uncompressed [verified].)
+- Parse fields: `Package, Version, Architecture, Depends, Pre-Depends, Provides, Filename, Size, SHA256`. `Architecture: all` packages (e.g. `python-pip`, `rust-src`) appear in each per-arch index [verified].
+- **Integrity:** verify each `.deb` against the `SHA256` in the index. Verify the index against `Release`/`InRelease` and Termux's signing key if practical; if not in v1, document the gap and rely on HTTPS + hash chain.
 
-```json
-{
-  "schema": 1,
-  "id": "c-cpp",
-  "name": "C / C++",
-  "description": "Clang compiler and clangd language server",
-  "icon": "icons/c-cpp.png",
-  "languages": [
-    { "languageId": "c",   "extensions": ["c", "h"] },
-    { "languageId": "cpp", "extensions": ["cpp", "cc", "cxx", "hpp", "hh", "hxx"] }
-  ],
-  "components": [
-    { "id": "compiler", "name": "Clang compiler + C/C++ headers", "required": true,
-      "packages": ["clang", "ndk-sysroot"],
-      "verify": { "command": ["$PREFIX/bin/clang", "--version"], "expect": "clang version" } },
-    { "id": "build-tools", "name": "Make & CMake", "default": false,
-      "packages": ["make", "cmake"] }
-  ],
-  "env": { "CPATH": "$PREFIX/include" },
-  "lsp": { "component": "compiler", "command": ["$PREFIX/bin/clangd", "--stdio"], "prepare": "compile-commands" },
-  "run": {
-    "file": "clang++ {file} -o $TMPDIR/{stem} && $TMPDIR/{stem}",
-    "project": { "detect": "Makefile", "command": "make" }
-  },
-  "syntax": {
-    "keywords": ["if", "else", "for", "while", "return", "struct", "class", "namespace", "template", "…"],
-    "types": ["int", "char", "void", "bool", "auto", "…"],
-    "lineComment": "//", "blockComment": ["/*", "*/"], "stringDelimiters": ["\"", "'"]
-  }
-}
-```
+### 6.2 Resolver
+- Input: list of package names (from the manifest). Output: ordered install closure.
+- Must handle: alternatives (`a | b` → pick first available), virtual packages (`Provides:`), version constraints (`(>= x)`), cycles, and packages already provided by Android (skip a small deny-list, e.g. `termux-tools`, `termux-exec`, `termux-keyring`, anything requiring `apt`/`dpkg` state).
+- Deterministic: same index → same closure. Log the closure.
 
-**Python**: moves Python from the self-hosted zip to Termux:
+### 6.3 Extractor
+- Parse `ar` → `data.tar.xz` (use a vetted library for XZ, e.g. Commons Compress). Note that `ar` member names carry a trailing `/` (`data.tar.xz/`) [verified]; the existing `startsWith("data.tar")` check handles it.
+- Paths inside `data.tar` are `./data/data/com.termux/files/usr/…` [verified]; strip to `usr/…`.
+- Preserve symlinks (real tar symlinks; e.g. `bin/clang -> clang-21` [verified]; handle legacy `SYMLINKS.txt` if present) and modes.
+- Reject path traversal (`..`, absolute paths escaping the store), cap decompressed size.
+- Textual rewrite pass (shebangs, small config) per §2.B.3.
 
-```json
+### 6.4 Installer
+1. Resolve closure → download with resume + progress → verify SHA256.
+2. Extract each package into `store/<name>/<version>/` (skip if present).
+3. Build `envs/<pack>/<ver>/` (symlink farm over store dirs).
+4. **Run the pack's `verify` command** (§7) using the real runtime. Only on success, atomically repoint `current` and write the lockfile. On failure, keep the previous `current`.
+5. GC: remove store entries not referenced by any lockfile, keep the previous version for one rollback.
+
+The existing "skip version check to avoid rolling back" hack (`TerminalViewModel.kt:1184`) must be deleted; a failing `verify` is a real failure.
+
+---
+
+## 7. Phase 3 — Manifest schema
+
+Packs list Termux **package names only**; versions are resolved locally and stored in the lockfile. Packs contain **no absolute paths** — only template variables.
+
+**Template variables:** `${prefix}` (pack env root), `${bin}`, `${lib}`, `${file}`, `${fileDir}`, `${fileStem}`, `${workspace}`, `${home}`, `${tmp}`.
+
+A component may also have **`postInstall`**: argv arrays run once after the component's packages are installed, writing only into the env's writable overlay (§5.1). This is required because some language servers are not Termux packages (see the Python example).
+
+```jsonc
 {
   "schema": 1,
   "id": "python",
   "name": "Python",
-  "languages": [ { "languageId": "python", "extensions": ["py", "pyw"] } ],
-  "components": [
-    { "id": "runtime", "name": "Python 3 + pip", "required": true,
-      "packages": ["python", "python-pip"],
-      "verify": { "command": ["$PREFIX/bin/python3", "--version"], "expect": "Python 3" } },
-    { "id": "lsp", "name": "Language server (pylsp)", "default": true,
-      "description": "Autocomplete, errors, hover docs",
-      "postInstall": [ ["$PREFIX/bin/python3", "-m", "pip", "install", "python-lsp-server"] ] }
-  ],
-  "env": { "PYTHONHOME": "$PREFIX" },
-  "lsp": { "component": "lsp", "command": ["$PREFIX/bin/python3", "-m", "pylsp"] },
-  "run": { "file": "python3 {file}" },
-  "syntax": { "keywords": ["def", "class", "import", "from", "return", "…"], "lineComment": "#", "stringDelimiters": ["\"", "'", "\"\"\"", "'''"] }
-}
-```
+  "version": "1.0.0",            // pack (manifest) version, not toolchain version
+  "icon": "python.svg",
+  "description": "Python 3 with pip",
+  "minKodrixVersion": "1.2.0",
 
-**Rust**: a brand-new language added purely as JSON. This is the proof of the whole system:
-
-```json
-{
-  "schema": 1,
-  "id": "rust",
-  "name": "Rust",
-  "languages": [ { "languageId": "rust", "extensions": ["rs"], "filenames": ["Cargo.toml"] } ],
-  "components": [
-    { "id": "toolchain", "name": "Compiler & Cargo", "required": true,
-      "packages": ["rust"],
-      "verify": { "command": ["$PREFIX/bin/rustc", "--version"], "expect": "rustc" } },
-    { "id": "lsp", "name": "Language server (rust-analyzer)", "default": true,
-      "description": "Autocomplete, errors, go-to-definition",
-      "packages": ["rust-analyzer"] }
+  "languages": [
+    {
+      "id": "python",
+      "extensions": ["py", "pyw"],
+      "filenames": [],
+      "shebangs": ["python", "python3"],
+      "highlight": { "type": "textmate", "grammar": "grammars/python.tmLanguage.json" },
+      "comment": { "line": "#", "block": null }
+    }
   ],
-  "lsp": { "component": "lsp", "command": ["$PREFIX/bin/rust-analyzer"] },
-  "run": {
-    "file": "rustc {file} -o $TMPDIR/{stem} && $TMPDIR/{stem}",
-    "project": { "detect": "Cargo.toml", "command": "cargo run" }
+
+  "components": [
+    { "id": "runtime", "required": true,  "termuxPackages": ["python", "python-pip"] },
+    // python-lsp-server is NOT a Termux package [verified] → install via pip.
+    // jedi-language-server is suggested over pylsp: pylsp depends on ujson (a C extension
+    // with no Android wheel), so pip would need a C compiler, i.e. the whole cpp pack.
+    { "id": "lsp",     "required": false, "default": true,  "termuxPackages": [],
+      "postInstall": [["${bin}/python3", "-m", "pip", "install", "--prefix", "${prefix}/local", "jedi-language-server"]] },
+    { "id": "tools",   "required": false, "default": false, "termuxPackages": ["ruff"] }
+  ],
+
+  "env": { "PYTHONHOME": "${prefix}", "PYTHONDONTWRITEBYTECODE": "1" },
+
+  "verify": { "cmd": ["${bin}/python3", "-c", "print('ok')"], "expect": "ok", "timeoutSec": 20 },
+
+  "lsp": {
+    "requiresComponent": "lsp",
+    "languageIds": ["python"],
+    "cmd": ["${prefix}/local/bin/jedi-language-server"],
+    "transport": "stdio",
+    "initializationOptions": {}
   },
-  "syntax": { "keywords": ["fn", "let", "mut", "impl", "match", "struct", "enum", "trait", "pub", "use", "…"], "lineComment": "//", "blockComment": ["/*", "*/"], "stringDelimiters": ["\""] }
+
+  "run": [
+    { "id": "run", "label": "Run", "cmd": ["${bin}/python3", "${file}"], "cwd": "${fileDir}" }
+  ]
 }
 ```
 
----
+C/C++ example differences: components use the `clang` package, which **also contains `clangd`** (there is no separate `clangd` package [verified]) plus `ndk-sysroot`; `run` has a two-step `build` (`clang++ ${file} -o ${tmp}/${fileStem}`) then `run` (`${tmp}/${fileStem}`); `lsp.cmd` is `${bin}/clangd` with `--compile-commands-dir`/flags templates.
 
-## 7. Automatic updates
+Other packages confirmed to exist for later packs [verified]: `rust` (depends on `clang`), `rust-analyzer` (depends on `rust-src`), `golang` (depends on `clang`), `ruff`, `make`, `cmake`, `openjdk-21`.
 
-Set up once, then everything stays current with no action from you or the user. There are two
-kinds of update, and both are automatic:
+Validation rules (reject the pack, don't guess): unknown `schema`; component ids unique; every `lsp.requiresComponent` exists; only whitelisted variables used; no `/` absolute path literals in `cmd`/`env`/`postInstall`; `termuxPackages` names match `[a-z0-9+.-]+`.
 
-| What changes | Who publishes it | How it reaches users |
-|---|---|---|
-| **Manifest** (new language, new optional component, fixed LSP flags, new keywords) | You push JSON to `KodrixMarketplace` | App re-fetches `index.json` + installed packs' manifests on launch and every 24 h. Takes effect instantly: no download, no app update. |
-| **Toolchain** (e.g. Termux ships a newer Rust) | Termux, automatically | Same background check compares installed package versions against the Termux index. |
-
-**Update flow for a toolchain:**
-1. A background job (Android `WorkManager`, daily, Wi-Fi + charging by default) fetches the
-   Termux index and diffs it against the install database (§5 step 8).
-2. The Languages panel shows an **Update** badge (e.g. "Rust 1.82 → 1.83, 45 MB").
-3. Depending on the user's setting: **Auto-install on Wi-Fi** (default) or **Ask me first**.
-4. **Safe swap:** new packages install into a staging area, run each component's `verify`,
-   and only then replace the old files. If `verify` fails, the update is discarded and the
-   working version stays. A broken upstream update can never leave a user with a dead language.
-
-**Your one-time setup:** create the `languages/` folder in `KodrixMarketplace` with `index.json`
-and one manifest per language. After that, adding a language = pushing one JSON file, and
-toolchain updates flow from Termux with no work on your side.
+**Ownership model:** a language can be provided by exactly one installed pack at a time; extension conflicts between packs are resolved by explicit user choice, not load order.
 
 ---
 
-## 8. App-side changes
+## 8. Phase 4 — Generic editor integration
 
-| Today | Becomes |
-|---|---|
-| `getLanguageId()` `when` block | lookup in installed packs' `languages[]` |
-| `SyntaxHighlighter.kt` per-language keyword lists | one generic highlighter driven by `manifest.syntax` (built-in lists kept as fallback for languages without a pack, e.g. Kotlin/JS) |
-| `startNativeLsp()` `when (langId)` branches | one path: resolve pack → run `lsp.prepare` hook → substitute variables → `launchLspClient()` (existing, unchanged) with `LD_PRELOAD` + pack `env` |
-| `installCppToolchain()`, `installPythonInBackground()`, `installPylspIfNeeded()` | `LanguagePackManager.install(packId)` → `TermuxPackageManager` |
-| "File opened → auto-install toolchain" | kept, but generic: opening an `.rs` file with Rust not installed shows "Install Rust support?" pointing at the panel |
-| n/a | new **Languages** sidebar mode: catalog from `index.json`; install dialog with component checkboxes and live sizes; progress (reusing `BinaryManager`'s notification helpers); add/remove components later; update badges; uninstall |
-| n/a | `LanguageUpdateWorker` (WorkManager) for the daily manifest + toolchain update check (§7) |
+Replace the hardcoded `when` blocks with lookups against the installed-pack registry:
 
-Out of scope, unchanged: Node and Git stay bundled in the APK (`libnode_bin.so`, `libgit_bin.so`)
-and managed by `BinaryManager`/`WrapperManager`; the Open VSX extension marketplace
-(`ExtensionManager`) is a separate concern.
+- `getLanguageId()` (`TerminalViewModel.kt:506`) → registry lookup by extension/filename/shebang.
+- Highlighting (`SyntaxHighlighter.kt:17`) → **TextMate grammars** (or tree-sitter), not keyword lists; otherwise "no APK change" fails for any language whose syntax isn't already built in. Keep the current keyword highlighter as the fallback when a grammar is missing/invalid. Grammars ship in the pack (JSON) — no native code.
+- `startNativeLsp()` (`:800–874`) → one generic launcher: expand `lsp.cmd` templates, build env via EnvBuilder, spawn through ExecProxy, speak stdio LSP. Reconnect/backoff and per-workspace instance policy live here once, not per language.
+- Run panel → render `run[]` entries; build-then-run chains supported.
+- Friendly names (`:894`) → manifest `name`.
+
+Keep a small built-in "core" set (plain text, JSON, Markdown, etc.) in the APK so the editor works with zero packs installed.
 
 ---
 
-## 9. Migration of existing languages
+## 9. Phase 5 — Languages panel UI
 
-- **C / C++:** existing installs live in `filesDir/versions/clang/<ver>/`. On first launch after
-  the update, treat them as "not installed" and offer a one-tap reinstall into the shared prefix,
-  then delete the old folder. No in-place conversion: the old layout moved headers into a custom
-  `sysroot/`, which the shared prefix no longer needs.
-- **Python:** existing installs from the self-hosted zip (`versions/python/3.13.13`) work the same
-  way. Offer reinstall from Termux, then remove the old folder. The Python version will then follow
-  Termux's cadence rather than your own builds. See open questions.
-- **`marketplace/python-support/manifest.json`** and similar metadata-only entries are superseded
-  by `languages/` and can be retired.
+- Side panel **Languages**: list from marketplace (name, icon, description, size estimate, installed version/update badge).
+- Detail sheet: components as checkboxes (required ones locked on), computed download size (from resolver), and an explicit **"This will run:"** list (LSP command, run commands) before install — see §10.
+- States: `Not installed → Resolving → Downloading (per-package progress) → Extracting → Verifying → Installed`; and `Update available`, `Failed (retry / view log)`.
+- Actions: Install, Update, Repair (re-verify + reinstall broken packages), Uninstall (remove env + unreferenced store entries), Roll back.
+- Install runs as a foreground service (survives app backgrounding); resumable after process death; Wi-Fi-only toggle for large packs.
+- Offline: installed packs work fully offline; index cache is used for "update available" checks when possible.
+- Persist install state + lockfiles; a corrupted state must degrade to "Repair", never crash the editor.
 
 ---
 
 ## 10. Security
 
-- Every `.deb` is SHA256-verified against the Termux index, a new protection vs. today.
-- Manifests define commands that run on users' devices (`postInstall`, `lsp`, `run`), so **anyone who
-  can push to `KodrixMarketplace` can run code on every Kodrix install**. Protect that repo: branch
-  protection on `main`, required 2FA, limited collaborators.
-- `postInstall`/`lsp`/`verify` are argv arrays, not shell strings, so a manifest can't smuggle in
-  shell metacharacters. `run` templates are shell (they run visibly in the terminal, like a user
-  typing them).
-- Later hardening: verify Termux's `InRelease` GPG signature on the index.
+A manifest defines commands that Kodrix executes → treat as a remote-code-execution surface by design.
+
+- Manifests come only from the official `KodrixMarketplace` repo over HTTPS; **sign manifests** with Ed25519 and reject unsigned/invalid ones. (Android's built-in Ed25519 is API 33+ only and `minSdk = 28`, so verification needs a library such as BouncyCastle or Tink.)
+- **Key custody (decided defaults):** the project owner holds the private key offline (not in the repo, not in CI secrets). Signing happens locally via a small script that signs every manifest and writes a detached `.sig` next to it. The APK embeds a **list** of trusted public keys (not one), so a key can be rotated by shipping a new APK that adds the new key before the old one is retired. If the key is lost or compromised: release a new APK with a fresh key and revoke the old one.
+- Show the user exactly which commands a pack will run before first install and on any update that changes `cmd`/`env`/`termuxPackages`/`postInstall`.
+- All downloaded `.deb`s hash-verified (§6.1). No unauthenticated HTTP anywhere.
+- Extraction hardened against path traversal, symlink escape, zip/tar bombs.
+- Packs cannot reference paths outside `${prefix}`, `${workspace}`, `${tmp}`, `${home}`.
+- Fix the already-noted committed keystore (`kodrix.jks`) separately; do not reuse any signing material in this system.
 
 ---
 
-## 11. Phased plan
+## 11. Updates
 
-| Phase | Deliverable | Exit criterion |
+- Termux serves only current builds, so partial upgrades (e.g. new `libllvm` with old `clang`) break ABI. `clang` pins `libllvm (= 21.1.8-3)` exactly [verified]. **Always upgrade a pack's full dependency closure together** into a new `envs/<pack>/<ver>/`, verify, then atomically switch; keep the previous one for rollback.
+- Two independent version tracks: manifest version (behaviour) and toolchain versions (from the index, recorded in the lockfile).
+- Update checks: on app start (throttled to 24 h) and manually from the panel. Never auto-update in the middle of a running LSP/run session; apply on next start or on user confirmation.
+- Manifest updates that change commands re-trigger the §10 consent prompt.
+
+---
+
+## 12. Distribution
+
+**Decided:** Kodrix ships via **GitHub Releases and F-Droid only**. Google Play is out of scope, because downloading and executing native code from outside the store is against its policy. This keeps the `targetSdk = 28` fallback (§4) available.
+
+Notes:
+- GitHub Releases is the primary channel. F-Droid builds from source and may flag runtime code download as an anti-feature; check its inclusion policy before submitting, and keep the language-pack system separable enough that an F-Droid build can be reviewed on its own.
+- The APK must not bundle any pack toolchains; packs are only fetched at runtime by explicit user action.
+
+---
+
+## 13. Migration of existing languages
+
+1. **C/C++ first (Phase 6a):** replace `installCppToolchain()` with the `cpp` pack (`clang` package, which includes `clangd`; resolver-driven). Delete the hardcoded URL list. Since that list already 404s (§2.C), there are no working C/C++ installs to preserve.
+2. **Python (Phase 6b):** move from the self-hosted zip (3.13.13) to Termux `python` (3.14.x) + `python-pip`. This is the hardest real test — native extensions, pip-generated scripts, sysconfig paths. `installPythonInBackground()` and `installPylspIfNeeded()` go away. Users' pip-installed packages built for 3.13 won't carry over to 3.14; the migration prompt must say so.
+3. Existing users: detect old installs, offer one-click migration, keep the old install until the new pack verifies, then remove it. Never leave a user without a working Python mid-migration.
+4. Then Node/Git: they already ship in the APK (`libnode_bin.so`, `libgit_bin.so`). Leave them as-is; optionally expose them as built-in (non-installable) packs so the panel is consistent.
+
+---
+
+## 14. Testing
+
+- **Unit (JVM):** manifest validation, template expansion, resolver (alternatives, virtuals, constraints, cycles) against saved real `Packages` snapshots, deb extraction incl. symlinks and traversal attempts.
+- **Instrumented (device):** the Phase 0 matrix as an automated suite; install → verify → run → uninstall for `python` and `cpp`; upgrade + rollback; kill process mid-install and resume.
+- **Contract test in CI:** nightly job that fetches the live Termux index, resolves every published pack, and downloads/hash-checks the closure — catches upstream breakage (constraint C) before users do. This would have caught the current 404s.
+- **Manual matrix:** Android 10, 13, 14, 15; arm64 device + x86_64 emulator; low-storage; airplane mode mid-install.
+
+---
+
+## 15. Phases and acceptance criteria
+
+| Phase | Scope | Done when |
 |---|---|---|
-| **0 — Execution spike** | `libkodrix-exec.so` (execve→linker64, shebang handling, Termux path remap) + `LD_PRELOAD` in terminal/LSP launch | On a real Android 10+ device: Termux `clangd --version` and `python3 -c 'print(1)'` run from `filesDir`. **Go/no-go gate.** Also confirms (and likely fixes) today's C/C++ breakage. |
-| **1 — TermuxPackageManager** | index fetch/parse, dependency resolver, SHA256-verified download, extract, path fixups, install DB, uninstall with refcounts | Installs `clang` with deps resolved automatically (no hand list); uninstall removes exactly what it added. |
-| **2 — Packs + generic engine** | manifest schema + `LanguagePackManager`, generic LSP launcher / run / highlighter; migrate **C/C++** | C/C++ works end-to-end from `c-cpp.json` with the old `when` branches deleted. |
-| **3 — Languages panel** | sidebar UI: browse, install dialog with component checkboxes + sizes, progress, add/remove components, uninstall | User installs C/C++ from the panel with no file-open trigger, and adds/removes an optional component afterwards. |
-| **4 — Prove extensibility** | migrate **Python** to Termux; add **Rust** purely by pushing `rust.json` | Rust works on a device **without an app update**. |
-| **5 — Auto-updates** | `LanguageUpdateWorker`, update badges, auto/ask setting, staged install + `verify` rollback | Editing a manifest on `KodrixMarketplace` shows up in the app without an update; a simulated failing toolchain update rolls back cleanly. |
+| 0 | Spike (§4) | Matrix passes on a real Android 14 device, or a fallback is chosen and documented |
+| 1 | Runtime: ExecProxy, EnvBuilder, path redirect | `python3`/`clang` run from `filesDir` incl. children + shebangs, in the app terminal |
+| 2 | Package manager (client, resolver, extractor, installer) | Installs a closure from the live index; atomic switch + rollback work; failed `verify` never replaces `current` |
+| 3 | Manifest schema + signing + validation | Two hand-written manifests (`cpp`, `python`) validate; unsigned/invalid rejected |
+| 4 | Generic editor integration | Highlighting, LSP, Run all driven by manifests; no per-language `when` left in Kotlin |
+| 5 | Languages panel UI | Full install/update/repair/uninstall flow with progress and consent screen |
+| 6a/6b | Migrate C/C++, then Python | Old installers deleted; existing users migrated without downtime |
+| 7 | Third language via JSON only (e.g. Go or Rust) | Added with **zero** app changes — proves the goal |
+
+Phase 7 is the real acceptance test of the whole design.
 
 ---
 
-## 12. Open questions for you
+## 16. Risks
 
-1. **Test devices:** what Android versions/phones can you test Phase 0 on? That gate needs a real device.
-2. **Python version cadence:** moving to Termux means Python follows Termux's version (currently
-   3.12/3.13-era). OK to drop your self-hosted 3.13.13 zip?
-3. **First new languages after Rust:** Go, Java/Kotlin (OpenJDK is large), PHP, Ruby, Lua? This
-   sets which built-in hooks (§6) might be needed.
-4. **Storage policy:** packs can be large (Clang ≈ 150 MB download). Should the panel warn above
-   some size, or offer "install to external storage" later?
-5. **Shared-dependency uninstall:** when the last pack using `libllvm` is removed, delete it
-   immediately or keep it cached?
+| Risk | Impact | Mitigation |
+|---|---|---|
+| Exec interception leaks (statically linked binaries, odd `execve` paths) | some tools fail | Phase 0 matrix; per-pack `verify`; proot fallback |
+| `com.termux` path leaks into behaviour | subtle breakage | redirect layer + env; grow the test matrix per package |
+| Upstream Termux churn | installs break (already happened, §2.C) | resolver + nightly contract test + mirror list |
+| Android tightens further | feature dies | keep `targetSdk = 28` and self-built-prefix fallbacks documented |
+| Storage use (C/C++ alone is ~518 MB installed [verified]) | user friction | show sizes up front, uninstall + GC, cache eviction |
+| Malicious/compromised manifest | RCE | signing + consent prompt + hash-pinned packages |
+
+---
+
+## 17. Decisions log
+
+| # | Decision | Status |
+|---|---|---|
+| 1 | Distribution: GitHub Releases + F-Droid only, no Play Store | **Decided** (§12) |
+| 2 | Phase 0 failure path: `targetSdk = 28` → proot → self-built prefix | **Decided** (§4) |
+| 3 | Highlighting: TextMate grammars (JSON-only, no native code) | **Decided** (§8) |
+| 4 | Manifest signing: Ed25519, owner-held offline key, multi-key list in APK | **Decided** (§10) |
+| 5 | Should `node`/`git` appear as built-in entries in the Languages panel? | Open — default: yes, non-installable, for UI consistency |
+| 6 | Minimum Android version for language packs | Open — default: Android 10 (API 29) |
+| 7 | Phase 0 test device | **Decided:** owner's Samsung, Android 14 |
+| 8 | Python LSP: `jedi-language-server` (pure Python) vs `pylsp` (needs a C compiler for `ujson`) | Open — default: `jedi-language-server` |

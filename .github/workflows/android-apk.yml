@@ -48,9 +48,62 @@ jobs:
       - name: Build debug APK
         run: ./gradlew :androidApp:assembleDebug --no-daemon --stacktrace
 
-      - name: Upload APK artifact
+      # The ABI splits config in androidApp/build.gradle.kts produces one APK per
+      # architecture plus a universal one. Sort them into per-ABI names by matching
+      # the ABI string AGP always embeds in the filename (regardless of the exact
+      # prefix), so each architecture can be uploaded as its own artifact below —
+      # letting you download only the ~250-300MB you need instead of the full
+      # ~1.1GB bundle. x86_64 is matched before x86 since "x86" is a substring of it.
+      - name: Sort APKs by architecture
+        run: |
+          mkdir -p apk_out
+          for f in androidApp/build/outputs/apk/debug/*.apk; do
+            base=$(basename "$f")
+            for abi in arm64-v8a armeabi-v7a x86_64 x86 universal; do
+              case "$base" in
+                *"$abi"*) cp "$f" "apk_out/kodrix-debug-$abi.apk"; break ;;
+              esac
+            done
+          done
+          echo "Sorted APKs:"
+          ls -la apk_out
+
+      - name: Upload arm64-v8a APK
         uses: actions/upload-artifact@v4
         with:
-          name: kodrix-debug-apk
-          path: androidApp/build/outputs/apk/debug/*.apk
+          name: kodrix-debug-apk-arm64-v8a
+          path: apk_out/kodrix-debug-arm64-v8a.apk
           retention-days: 14
+          if-no-files-found: warn
+
+      - name: Upload armeabi-v7a APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: kodrix-debug-apk-armeabi-v7a
+          path: apk_out/kodrix-debug-armeabi-v7a.apk
+          retention-days: 14
+          if-no-files-found: warn
+
+      - name: Upload x86_64 APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: kodrix-debug-apk-x86_64
+          path: apk_out/kodrix-debug-x86_64.apk
+          retention-days: 14
+          if-no-files-found: warn
+
+      - name: Upload x86 APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: kodrix-debug-apk-x86
+          path: apk_out/kodrix-debug-x86.apk
+          retention-days: 14
+          if-no-files-found: warn
+
+      - name: Upload universal APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: kodrix-debug-apk-universal
+          path: apk_out/kodrix-debug-universal.apk
+          retention-days: 14
+          if-no-files-found: warn

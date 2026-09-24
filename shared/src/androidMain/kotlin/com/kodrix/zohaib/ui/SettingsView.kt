@@ -309,6 +309,88 @@ fun SettingsContent(viewModel: TerminalViewModel) {
                     )
                 }
 
+                if (isBetaMode) {
+                    HorizontalDivider(color = Color(0xFF30363D), thickness = 1.dp)
+
+                    // ── Native Exec Bridge toggle ──────────────────────────────
+                    val isExecBridgeEnabled by viewModel.isExecBridgeEnabled.collectAsState()
+                    var showExecLog by remember { mutableStateOf(false) }
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = (12 * uiScale).dp, vertical = (10 * uiScale).dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                "Native Exec Bridge",
+                                color = if (isExecBridgeEnabled) Color(0xFFF78166) else Color.White,
+                                fontSize = (13 * uiScale).sp,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                            Spacer(Modifier.height((2 * uiScale).dp))
+                            Text(
+                                text = "UNTESTED — Language Packs Phase 0 spike. Lets downloaded " +
+                                    "binaries run in the terminal (see documents/LANGUAGE_PACKS.md). " +
+                                    "May break terminal commands; disable if anything misbehaves.",
+                                color = Color(0xFF8B949E),
+                                fontSize = (10 * uiScale).sp,
+                                lineHeight = (14 * uiScale).sp
+                            )
+                        }
+                        Spacer(Modifier.width((8 * uiScale).dp))
+                        Switch(
+                            checked = isExecBridgeEnabled,
+                            onCheckedChange = { viewModel.setExecBridgeEnabled(it) },
+                            colors = SwitchDefaults.colors(
+                                checkedThumbColor   = Color(0xFFF78166),
+                                checkedTrackColor   = Color(0xFFF78166).copy(alpha = 0.35f),
+                                uncheckedThumbColor = Color(0xFF484F58),
+                                uncheckedTrackColor = Color(0xFF21262D)
+                            )
+                        )
+                    }
+                    SettingsDivider()
+                    SettingsActionRow(
+                        label = "View Exec Log",
+                        description = "See what the bridge did (or why it failed) on this device",
+                        icon = Icons.Default.Article,
+                        uiScale = uiScale,
+                        onClick = { showExecLog = true }
+                    )
+
+                    if (showExecLog) {
+                        AlertDialog(
+                            onDismissRequest = { showExecLog = false },
+                            containerColor = Color(0xFF161B22),
+                            title = { Text("Exec Bridge Log", color = Color.White, fontSize = (14 * uiScale).sp) },
+                            text = {
+                                Text(
+                                    viewModel.readExecLog(),
+                                    color = Color(0xFFCDD9E5),
+                                    fontSize = (11 * uiScale).sp,
+                                    fontFamily = FontFamily.Monospace,
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .heightIn(max = 400.dp)
+                                        .verticalScroll(rememberScrollState())
+                                        .horizontalScroll(rememberScrollState())
+                                )
+                            },
+                            confirmButton = {
+                                TextButton(onClick = { showExecLog = false }) {
+                                    Text("Close", color = Color(0xFF58A6FF))
+                                }
+                            },
+                            dismissButton = {
+                                TextButton(onClick = { viewModel.clearExecLog(); showExecLog = false }) {
+                                    Text("Clear", color = Color(0xFFF85149))
+                                }
+                            }
+                        )
+                    }
+                }
+
                 HorizontalDivider(color = Color(0xFF30363D), thickness = 1.dp)
 
                 // Force Crash button for Crashlytics

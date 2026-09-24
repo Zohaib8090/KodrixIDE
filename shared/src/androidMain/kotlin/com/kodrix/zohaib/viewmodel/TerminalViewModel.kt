@@ -486,6 +486,44 @@ class TerminalViewModel(application: Application) : AndroidViewModel(application
         }
     }
 
+    // ── Native Exec Bridge (Language Packs Phase 0 spike, experimental) ─────────
+    //
+    // Untested off-device LD_PRELOAD shim (documents/LANGUAGE_PACKS.md). Off by default.
+    // Toggling writes/removes a flag file that PtyBridge's generated init.sh checks with
+    // a shell `[ -f ... ]` at terminal session startup — same mechanism as Safe Mode above.
+    private val _isExecBridgeEnabled = MutableStateFlow(prefs.getBoolean("exec_bridge_enabled", false))
+    val isExecBridgeEnabled = _isExecBridgeEnabled.asStateFlow()
+
+    fun setExecBridgeEnabled(enabled: Boolean) {
+        _isExecBridgeEnabled.value = enabled
+        prefs.edit().putBoolean("exec_bridge_enabled", enabled).apply()
+        val flagFile = java.io.File(getApplication<Application>().filesDir, "exec_bridge_enabled")
+        if (enabled) {
+            flagFile.writeText("1")
+        } else {
+            flagFile.takeIf { it.exists() }?.delete()
+        }
+    }
+
+    /** Full content of kodrix_exec.log, or a helpful placeholder if it doesn't exist yet. */
+    fun readExecLog(): String {
+        val logFile = java.io.File(getApplication<Application>().filesDir, "kodrix_exec.log")
+        if (!logFile.exists()) {
+            return "No log yet. Enable the bridge above, then open a new terminal tab " +
+                "and run a command — even a plain \"ls\" — to generate the first line."
+        }
+        return try {
+            logFile.readText().ifBlank { "Log file is empty." }
+        } catch (e: Exception) {
+            "Failed to read log: ${e.message}"
+        }
+    }
+
+    fun clearExecLog() {
+        java.io.File(getApplication<Application>().filesDir, "kodrix_exec.log")
+            .takeIf { it.exists() }?.delete()
+    }
+
     // ── Beta Mode ─────────────────────────────────────────────────────────────
     //
     // Unlocks features listed in BetaFlags.kt that are under active testing.

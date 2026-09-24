@@ -611,6 +611,22 @@ class PtyBridge {
             else
                 export PATH="$usrBinDir:/system/bin:/system/xbin"
             fi
+            # ── Native Exec Bridge (Language Packs Phase 0 spike, experimental) ──────
+            # If enabled in Settings → Environment, LD_PRELOAD the kodrix_exec shim so
+            # downloaded ELF binaries under this app's data dir run via the system
+            # linker instead of being blocked by SELinux (see documents/LANGUAGE_PACKS.md
+            # §2.A and §4). KODRIX_ROOT is an empty scratch dir the user extracts a
+            # manually-downloaded Termux package into to run the Phase 0 test matrix.
+            # Every decision and failure is appended to KODRIX_LOG, readable from
+            # Settings → Environment → View Exec Log.
+            if [ -f "$filesDir/exec_bridge_enabled" ]; then
+                mkdir -p "$filesDir/kodrix-lang-root"
+                export LD_PRELOAD="$nativeLibPath/libkodrix_exec.so"
+                export KODRIX_ROOT="$filesDir/kodrix-lang-root"
+                export KODRIX_LOG="$filesDir/kodrix_exec.log"
+                export KODRIX_EXEC_DEBUG=1
+            fi
+
             export OPENSSL_CONF="/dev/null"
             export RESOLV_CONF="$usrEtcDir/resolv.conf"
             export GIT_SSL_NO_VERIFY=true

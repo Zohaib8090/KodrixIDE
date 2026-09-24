@@ -23,3 +23,12 @@ target_link_libraries(native-lib
     git2
     ${log-lib}
 )
+
+# libkodrix_exec.so — the LD_PRELOAD exec/path-redirect bridge (Language Packs Phase 0
+# spike, see documents/LANGUAGE_PACKS.md). Plain C, no dependency on native-lib.cpp.
+# NOT wired into any production exec path yet — only loaded when the user turns on the
+# "Native exec bridge" toggle in Settings, which sources it into terminal sessions via
+# init.sh. Untested off-device; do not use for real language-pack installs until the
+# Phase 0 device matrix passes.
+add_library(kodrix_exec SHARED kodrix_exec.c)
+target_link_libraries(kodrix_exec ${log-lib})

@@ -22,12 +22,20 @@ jobs:
           distribution: temurin
           java-version: "17"
 
-      # ubuntu-latest GitHub-hosted runners ship a preinstalled Android SDK
-      # with `sdkmanager` already on PATH. We deliberately do NOT use the
+      # ubuntu-latest GitHub-hosted runners ship a preinstalled Android SDK,
+      # but `sdkmanager` lives under a version-specific cmdline-tools folder
+      # (e.g. cmdline-tools/16.0/bin) that isn't on PATH by default. Locate
+      # it dynamically instead of hardcoding a version that may drift as the
+      # runner image updates. We deliberately do NOT use the
       # android-actions/setup-android action here: its v3 setup step runs
       # `sdkmanager tools`, which installs the legacy "tools" package that
       # Google removed from the SDK repository years ago, so that action
       # fails outright before the build even starts.
+      - name: Add Android cmdline-tools to PATH
+        run: |
+          SDKMANAGER_PATH=$(find "$ANDROID_HOME" -type f -name sdkmanager | sort -V | tail -n1)
+          echo "$(dirname "$SDKMANAGER_PATH")" >> "$GITHUB_PATH"
+
       - name: Accept Android SDK licenses
         run: yes | sdkmanager --licenses > /dev/null || true
 

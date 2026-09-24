@@ -54,7 +54,7 @@ log.txt
 scripts/*.sh
 !scripts/
 !app/src/main/jniLibs/
-t e m p - b u i l d /  
+temp-build/  
 
 # Kodrix Scratch & Temp
 __pycache__/

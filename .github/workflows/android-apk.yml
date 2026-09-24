@@ -22,12 +22,17 @@ jobs:
           distribution: temurin
           java-version: "17"
 
-      - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
+      # ubuntu-latest GitHub-hosted runners ship a preinstalled Android SDK
+      # with `sdkmanager` already on PATH. We deliberately do NOT use the
+      # android-actions/setup-android action here: its v3 setup step runs
+      # `sdkmanager tools`, which installs the legacy "tools" package that
+      # Google removed from the SDK repository years ago, so that action
+      # fails outright before the build even starts.
+      - name: Accept Android SDK licenses
+        run: yes | sdkmanager --licenses > /dev/null || true
 
       - name: Install NDK + CMake
-        run: |
-          sdkmanager --install "ndk;30.0.14904198" "cmake;3.22.1"
+        run: sdkmanager --install "ndk;30.0.14904198" "cmake;3.22.1"
 
       - name: Grant execute permission for gradlew
         run: chmod +x gradlew

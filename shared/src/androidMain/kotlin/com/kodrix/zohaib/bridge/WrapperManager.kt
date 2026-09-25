@@ -84,6 +84,13 @@ object WrapperManager {
                     when (spec.type) {
                         "symlink" -> writeSymlink(context, target, dest, cfg)
                         "script"  -> writeScriptWrapper(target, dest, spec.interpreter, cfg)
+                        // A command people expect that this runtime doesn't have (e.g. rustup):
+                        // explain instead of "not found". The text is in [WrapperSpec.path].
+                        "message" -> {
+                            val text = spec.path.replace("'", "'\\''")
+                            dest.writeText("#!/system/bin/sh\nprintf '%s\\n' '$text' >&2\nexit 127\n")
+                            dest.setExecutable(true, false)
+                        }
                         else      -> Log.w(TAG, "[${cfg.toolName}] Unknown wrapper type '${spec.type}' for '${spec.name}' — skipping")
                     }
                 }

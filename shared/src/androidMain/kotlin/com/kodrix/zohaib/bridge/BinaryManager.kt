@@ -256,13 +256,14 @@ class BinaryManager(private val context: Context) {
     fun prepare() {
         if (prepared) return
         _pausedTools.value = prefs.getStringSet(PAUSED_KEY, null)?.toSet() ?: emptySet()
+        // Language lookups work offline from the last registry we saw, and the built-in
+        // catalog is always there (wrappers below use its hints).
+        applyRegistryConfig(readCachedRegistry() ?: JSONObject())
         cleanUpStaleDownloads()
         // Populate the safe-mode fallback directory (bundled-only wrappers, never modified again)
         WrapperManager.writeSafeModeWrappers(context)
         // Recreate dynamic wrappers using current active versions on startup
         rebuildWrappers()
-        // Language lookups work offline from the last registry we saw.
-        readCachedRegistry()?.let { applyRegistryConfig(it) }
         prepared = true
     }
 
@@ -332,12 +333,19 @@ class BinaryManager(private val context: Context) {
         WrapperManager.recreateWrappers(context, configs)
     }
 
-    private fun manifestWrappers(manifest: RuntimeManifest?): List<WrapperManager.WrapperSpec>? =
-        manifest?.binaries?.takeIf { it.isNotEmpty() }?.map { entry ->
+    private fun manifestWrappers(manifest: RuntimeManifest?): List<WrapperManager.WrapperSpec>? {
+        manifest ?: return null
+        val commands = manifest.binaries.takeIf { it.isNotEmpty() }?.map { entry ->
             // "lua=lua5.4" exposes bin/lua5.4 as `lua`; a plain name maps to bin/<name>.
             val name = entry.substringBefore('=')
             WrapperManager.WrapperSpec(name, "symlink", "bin/" + entry.substringAfter('=', name))
-        }
+        } ?: return null
+        // Commands people expect but this runtime doesn't have (rustup, …) explain themselves.
+        val hints = registryTools[manifest.tool]?.optJSONObject("hints").toStringMap()
+            .filterKeys { hint -> commands.none { it.name == hint } }
+            .map { (name, text) -> WrapperManager.WrapperSpec(name, "message", text) }
+        return commands + hints
+    }
 
     private fun buildDefaultWrappers(tool: String): List<WrapperManager.WrapperSpec> = when (tool) {
         "node" -> listOf(

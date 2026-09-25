@@ -3683,7 +3683,9 @@ class TerminalViewModel(application: Application) : AndroidViewModel(application
     private fun startTerminalSession() {
         val nextId = (_instances.value.maxByOrNull { it.id }?.id ?: 0) + 1
         val projDir = _activeProject.value?.let { java.io.File(projectsRoot, it) }
-        val cwd = projDir?.absolutePath ?: "/"
+        // With no project open, start in the projects folder: "/" isn't readable by apps
+        // on Android, so `ls` there fails with "Permission denied".
+        val cwd = (projDir ?: projectsRoot.apply { mkdirs() }).absolutePath
 
         // Use holder so the client callback can reference the instance
         var instanceHolder: TerminalInstance? = null

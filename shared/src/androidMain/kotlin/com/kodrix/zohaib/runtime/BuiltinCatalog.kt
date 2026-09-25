@@ -37,6 +37,7 @@ object BuiltinCatalog {
         "description": "Python 3 with pip. Autocomplete by Pyright.",
         "languages": { "py": "python", "pyw": "python", "pyi": "python" },
         "binaries": ["python", "python3", "pip", "pip3"],
+        "hints": { "py": "Use python3 (or python) to run Python here." },
         "env": { "PYTHONHOME": "%install%" },
         "verify": { "command": ["%install%/bin/python3", "--version"] },
         "lsp": { "command": ["%node%", "%install%/lsp/node_modules/pyright/langserver.index.js", "--stdio"], "npm": ["pyright"] },
@@ -56,6 +57,11 @@ object BuiltinCatalog {
         "description": "rustc and cargo. Autocomplete by rust-analyzer. Large download.",
         "languages": { "rs": "rust" },
         "binaries": ["rustc", "cargo", "rustdoc", "rust-analyzer"],
+        "env": { "CARGO_HOME": "%install%/cargo-home" },
+        "hints": {
+          "rustup": "rustup isn't used in Kodrix: Rust is installed and updated from Marketplace -> Runtimes. Use rustc to compile and cargo to build/run (e.g. cargo new hello && cd hello && cargo run).",
+          "rust": "There's no 'rust' command. Use rustc file.rs to compile, or cargo new / cargo run for projects."
+        },
         "lsp": { "command": ["%install%/bin/rust-analyzer"] },
         "verify": { "command": ["%install%/bin/rustc", "--version"] },
         "versions": [ { "packages": ["rust", "rust-src", "rust-analyzer"], "versionPackage": "rust" } ]

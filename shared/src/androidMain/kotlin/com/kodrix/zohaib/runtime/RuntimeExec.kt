@@ -60,7 +60,9 @@ object RuntimeExec {
     fun command(context: Context, binary: File, args: List<String>, depth: Int = 0): List<String> {
         if (!isAppData(context, binary) || depth > 3) return listOf(binary.absolutePath) + args
         if (isElf(binary)) return listOf(linkerFor(binary), binary.absolutePath) + args
-        val (interp, interpArg) = shebang(binary) ?: return listOf(binary.absolutePath) + args
+        val (rawInterp, interpArg) = shebang(binary) ?: return listOf(binary.absolutePath) + args
+        // Android has no /usr; its env lives in /system/bin.
+        val interp = if (rawInterp == "/usr/bin/env") "/system/bin/env" else rawInterp
         val interpFile = File(interp)
         val rest = listOfNotNull(interpArg) + binary.absolutePath + args
         return command(context, interpFile, rest, depth + 1)

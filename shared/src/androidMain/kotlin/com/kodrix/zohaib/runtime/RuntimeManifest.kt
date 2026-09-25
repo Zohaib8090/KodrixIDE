@@ -26,6 +26,8 @@ data class RuntimeManifest(
     /** File extension (no dot, lowercase) → LSP languageId. */
     val languages: Map<String, String> = emptyMap(),
     val lsp: Lsp? = null,
+    /** The packages that were asked for (without dependencies), used to look for updates. */
+    val roots: List<String> = emptyList(),
 ) {
     data class Lsp(
         /** argv; `${install}` → install dir, `${node}` → the Node.js built into the app. */
@@ -61,6 +63,7 @@ data class RuntimeManifest(
         put("env", JSONObject(env as Map<*, *>))
         put("languages", JSONObject(languages as Map<*, *>))
         lsp?.let { put("lsp", it.toJson()) }
+        if (roots.isNotEmpty()) put("roots", JSONArray(roots))
     }
 
     fun writeTo(installDir: File) {
@@ -85,6 +88,7 @@ data class RuntimeManifest(
                     env = o.optJSONObject("env").toStringMap(),
                     languages = o.optJSONObject("languages").toStringMap().mapKeys { it.key.lowercase().removePrefix(".") },
                     lsp = Lsp.fromJson(o.optJSONObject("lsp")),
+                    roots = o.optJSONArray("roots").toStringList(),
                 )
             } catch (_: Exception) {
                 null

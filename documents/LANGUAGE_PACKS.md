@@ -510,3 +510,24 @@ install dir.
 Known limit: Go (and possibly Zig) start child processes with raw system calls rather than the
 C library, so the preload shim can't redirect them; `go version` works, but gopls (which runs `go list`) and
 `go build` may be blocked. Both are marked experimental in the registry.
+
+### Zero-maintenance catalog (update)
+
+* **Built-in catalog** — `runtime/BuiltinCatalog.kt` ships ~24 languages (Node, Python,
+  C/C++, Rust, Go, Lua, PHP, Zig, Dart, Gleam, Swift, Ruby, Java, Kotlin, Perl, Elixir,
+  Haskell, Nim, Crystal, Deno, Bun, Markdown, TOML) in the registry schema. The online
+  `versions.json` adds to it or overrides entries by id; with no registry at all, everything
+  still works. Entries never list versions, so the table only changes when a new *language*
+  is added. Entries whose main package doesn't exist for the phone's CPU are hidden.
+* **All packages** — searching in Marketplace → Runtimes also searches the whole Termux
+  index (~3,000 packages). A package that is the main package of a catalog language goes
+  through that language's setup (language server included); anything else installs as
+  `pkg-<name>` with its dependencies, and the commands it ships are put on the PATH. Installed
+  packages are listed with an **Update** entry whenever the index has a newer version.
+* **Node** now comes from Termux (`nodejs` = Latest, `nodejs-lts` = LTS), so it updates by
+  itself; the old prebuilt zips are marked `legacy` for older app builds.
+* **Weekly check** — `KodrixMarketplace/.github/workflows/check-registry.yml` resolves every
+  entry (registry + app catalog) on all four CPU types and opens a `runtime-check` issue if a
+  package disappears, closing it when things work again.
+* Generic installs are verified leniently: only "can't run at all" (blocked, missing library,
+  wrong CPU) undoes the install; a tool that doesn't understand `--version` is kept.

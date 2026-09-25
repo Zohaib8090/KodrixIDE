@@ -40,6 +40,8 @@ object TermuxRepo {
         "termux-core", "termux-licenses", "apt", "dpkg",
     )
 
+    private val NOISE_SUFFIXES = listOf("-static", "-dbg", "-doc", "-dev")
+
     /** Everything a package extracts lives under this prefix inside `data.tar`. */
     const val TERMUX_USR = "data/data/com.termux/files/usr/"
     const val TERMUX_PREFIX_ABS = "/data/data/com.termux/files/usr"
@@ -54,6 +56,8 @@ object TermuxRepo {
         val size: Long,
         val installedSizeKb: Long,
         val sha256: String,
+        /** One-line summary from the index. */
+        val description: String = "",
     )
 
     class Index(val packages: Map<String, Pkg>) {
@@ -62,6 +66,34 @@ object TermuxRepo {
         }
 
         fun find(name: String): Pkg? = packages[name] ?: providers[name]?.firstOrNull()?.let { packages[it] }
+
+        /**
+         * Packages matching [query], best first: exact name, then name prefix, then name
+         * contains, then description contains. Development headers, debug symbols and
+         * static libraries are left out, since nobody installs those on purpose.
+         */
+        fun search(query: String, limit: Int = 40): List<Pkg> {
+            val q = query.trim().lowercase()
+            if (q.isEmpty()) return emptyList()
+            fun rank(p: Pkg): Int {
+                val n = p.name.lowercase()
+                return when {
+                    n == q -> 0
+                    n.startsWith(q) -> 1
+                    n.contains(q) -> 2
+                    p.description.lowercase().contains(q) -> 3
+                    else -> -1
+                }
+            }
+            return packages.values.asSequence()
+                .filter { p -> NOISE_SUFFIXES.none { p.name.endsWith(it) } && p.name !in IGNORED_PACKAGES }
+                .map { it to rank(it) }
+                .filter { it.second >= 0 }
+                .sortedWith(compareBy({ it.second }, { it.first.name.length }, { it.first.name }))
+                .take(limit)
+                .map { it.first }
+                .toList()
+        }
     }
 
     class ResolveException(message: String) : Exception(message)
@@ -94,6 +126,7 @@ object TermuxRepo {
                     size = fields["Size"]?.toLongOrNull() ?: 0L,
                     installedSizeKb = fields["Installed-Size"]?.toLongOrNull() ?: 0L,
                     sha256 = fields["SHA256"].orEmpty(),
+                    description = fields["Description"].orEmpty(),
                 )
             }
             fields.clear()
@@ -333,19 +366,53 @@ object TermuxRepo {
         val dirs = listOf(File(installDir, "bin"), File(installDir, "libexec"))
         for (dir in dirs) {
             if (!dir.isDirectory) continue
-            dir.walkTopDown().filter { it.isFile && !Files.isSymbolicLink(it.toPath()) && it.length() in 3..(2L * 1024 * 1024) }
+            val root = installDir.canonicalFile
+            // Commands are often links into lib/ (bin/npm → lib/node_modules/npm/bin/npm-cli.js),
+            // so fix the real file a link points at too, as long as it's inside the install.
+            dir.walkTopDown().mapNotNull { f ->
+                if (!Files.isSymbolicLink(f.toPath())) f.takeIf { it.isFile }
+                else runCatching { f.canonicalFile }.getOrNull()
+                    ?.takeIf { it.isFile && it.path.startsWith(root.path + File.separator) }
+            }.distinct().filter { it.length() in 3..(2L * 1024 * 1024) }
                 .forEach { f ->
                     val head = f.inputStream().use { s -> ByteArray(2).also { s.read(it) } }
                     if (head[0] != '#'.code.toByte() || head[1] != '!'.code.toByte()) return@forEach
                     val text = f.readText(Charsets.ISO_8859_1)
                     val nl = text.indexOf('\n').let { if (it < 0) text.length else it }
                     val first = text.substring(0, nl)
-                    if (!first.contains(TERMUX_PREFIX_ABS)) return@forEach
+                    val fixed = fixShebang(first, installDir) ?: return@forEach
                     val wasExec = f.canExecute()
-                    f.writeText(first.replace(TERMUX_PREFIX_ABS, installDir.path) + text.substring(nl), Charsets.ISO_8859_1)
+                    f.writeText(fixed + text.substring(nl), Charsets.ISO_8859_1)
                     if (wasExec) f.setExecutable(true, false)
                 }
         }
+    }
+
+    /**
+     * Rewrites one `#!` line so it points at something that exists on this device, or
+     * returns null to leave it alone:
+     *  - Termux's prefix becomes [installDir];
+     *  - `/usr/bin/env prog` (no /usr on Android) runs prog from [installDir]/bin when it
+     *    is there, otherwise through Android's own `/system/bin/env`;
+     *  - a shell (sh/bash/dash) that the install doesn't include falls back to `/system/bin/sh`.
+     */
+    internal fun fixShebang(line: String, installDir: File): String? {
+        val body = line.removePrefix("#!").trim()
+        val interp = body.substringBefore(' ').substringBefore('\t')
+        val rest = body.removePrefix(interp).trim()
+        val envLike = interp == "/usr/bin/env" || interp == "$TERMUX_PREFIX_ABS/bin/env"
+        if (envLike && rest.isNotEmpty() && !rest.startsWith("-")) {
+            val prog = rest.substringBefore(' ')
+            val args = rest.removePrefix(prog).trim()
+            val local = File(installDir, "bin/$prog")
+            return if (local.exists()) "#!${local.path}" + (if (args.isNotEmpty()) " $args" else "")
+            else "#!/system/bin/env $rest"
+        }
+        if (!interp.startsWith(TERMUX_PREFIX_ABS)) return null
+        val mapped = File(installDir.path + interp.removePrefix(TERMUX_PREFIX_ABS))
+        val name = mapped.name
+        val target = if (!mapped.exists() && (name == "sh" || name == "bash" || name == "dash")) "/system/bin/sh" else mapped.path
+        return "#!$target" + (if (rest.isNotEmpty()) " $rest" else "")
     }
 
     // ── Stream helpers ───────────────────────────────────────────────────────

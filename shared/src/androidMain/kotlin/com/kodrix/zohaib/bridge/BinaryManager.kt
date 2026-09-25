@@ -10,6 +10,7 @@ import androidx.core.app.NotificationCompat
 import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKey
 import com.kodrix.zohaib.runtime.RuntimeExec
+import com.kodrix.zohaib.runtime.BuiltinCatalog
 import com.kodrix.zohaib.runtime.RuntimeManifest
 import com.kodrix.zohaib.runtime.TermuxRepo
 import com.kodrix.zohaib.runtime.toStringList
@@ -156,6 +157,9 @@ class BinaryManager(private val context: Context) {
 
         // Bundled default versions — treated as "active" when no user selection exists
         private const val PAUSED_KEY = "paused_tools"
+
+        /** Tool id prefix for packages installed from "All packages" (not in any catalog). */
+        const val PACKAGE_PREFIX = "pkg-"
 
         private val BUNDLED_DEFAULTS = mapOf(
             "node" to Triple("25.8.2", "v25.8.2 (Built-in)", "libnode_bin.so"),
@@ -386,6 +390,9 @@ class BinaryManager(private val context: Context) {
         root.keys().forEach { key ->
             if (!key.startsWith("_")) root.optJSONObject(key)?.let { tools[key] = it }
         }
+        // Languages built into the app fill in whatever the online registry doesn't list,
+        // so everything keeps working with no registry at all.
+        BuiltinCatalog.tools.forEach { (id, obj) -> if (id !in tools) tools[id] = obj }
         registryTools = tools
         root.optJSONObject("_config")?.optJSONArray("termuxMirrors").toStringList()
             .takeIf { it.isNotEmpty() }?.let { termuxMirrors = (it + TermuxRepo.DEFAULT_MIRRORS).distinct() }
@@ -395,12 +402,20 @@ class BinaryManager(private val context: Context) {
      * Termux index from the first mirror that answers, cached for a few hours. Returns the
      * mirror too, because the .debs must be downloaded from the same one.
      */
+    /** Last parsed index, keyed by cache file and its timestamp (parsing takes a moment). */
+    @Volatile private var parsedIndex: Pair<Pair<String, Long>, Pair<String, TermuxRepo.Index>>? = null
+
     private fun termuxIndex(maxAgeMs: Long): Pair<String, TermuxRepo.Index>? {
         var stale: Pair<String, File>? = null
         for (mirror in termuxMirrors) {
             val cache = File(registryDir, "termux-$termuxArch-${mirror.hashCode().toUInt()}.txt")
             if (cache.isFile && System.currentTimeMillis() - cache.lastModified() < maxAgeMs) {
-                try { return mirror to TermuxRepo.parseIndex(cache.readText()) } catch (_: Exception) {}
+                parsedIndex?.let { (key, value) -> if (key == cache.path to cache.lastModified()) return value }
+                try {
+                    val parsed = mirror to TermuxRepo.parseIndex(cache.readText())
+                    parsedIndex = (cache.path to cache.lastModified()) to parsed
+                    return parsed
+                } catch (_: Exception) {}
             }
             try {
                 val text = TermuxRepo.fetchText(TermuxRepo.indexUrl(mirror, termuxArch))
@@ -482,6 +497,39 @@ class BinaryManager(private val context: Context) {
                         ))
                     }
                 }
+            }
+
+            // Packages installed from "All packages": described by their own manifest, and
+            // checked for a newer version against the same package index.
+            versionsDir.listFiles()?.filter {
+                it.isDirectory && it.name !in registryTools && it.name !in BUNDLED_DEFAULTS
+            }?.forEach { toolDir ->
+                val toolName = toolDir.name
+                val dirs = toolDir.listFiles()?.filter { it.isDirectory && isInstalledDir(toolName, it) }.orEmpty()
+                if (dirs.isEmpty()) return@forEach
+                val activeVer = getActiveVersion(toolName)
+                val manifest = dirs.firstNotNullOfOrNull { RuntimeManifest.readFrom(it) }
+                val roots = manifest?.roots?.ifEmpty { null } ?: listOf(toolName.removePrefix(PACKAGE_PREFIX))
+                metas.add(ToolMeta(
+                    id = toolName,
+                    displayName = manifest?.displayName ?: toolName.removePrefix(PACKAGE_PREFIX),
+                    category = "Package",
+                    iconUrl = "",
+                    description = termux?.second?.find(roots.first())?.description.orEmpty(),
+                    extensions = manifest?.languages?.keys?.toList().orEmpty(),
+                    hasLanguageServer = manifest?.lsp != null,
+                ))
+                dirs.forEach { dir ->
+                    list.add(RemoteVersion(
+                        tool = toolName, version = dir.name, tag = "v${dir.name}", downloadUrl = "",
+                        isInstalled = true, isActive = activeVer == dir.name, source = "installed",
+                        packages = roots, label = "Installed",
+                    ))
+                }
+                val latest = JSONObject().put("packages", JSONArray(roots)).put("tag", "Latest")
+                termuxVersion(toolName, latest, termux)
+                    ?.takeIf { v -> !v.isUnavailable && dirs.none { it.name == v.version } }
+                    ?.let { list.add(it.copy(label = "Update")) }
             }
 
             _availableVersions.value = list
@@ -678,7 +726,10 @@ class BinaryManager(private val context: Context) {
         val (binary, args) = if (cmd.isNotEmpty()) {
             File(RuntimeExec.expand(cmd.first(), installDir)) to cmd.drop(1)
         } else {
-            val name = manifest?.binaries?.firstOrNull()?.let { it.substringAfter('=', it) } ?: tool
+            val candidates = (manifest?.binaries ?: emptyList()).map { it.substringAfter('=', it) } + tool
+            val name = candidates.firstOrNull { File(installDir, "bin/$it").exists() }
+                // Nothing runnable (e.g. a library package): nothing to check.
+                ?: return VersionChecker.VerifiedVersion(tool, installDir.name, true)
             File(installDir, "bin/$name") to listOf("--version")
         }
         return VersionChecker.check(
@@ -728,6 +779,64 @@ class BinaryManager(private val context: Context) {
 
     // ── Install ───────────────────────────────────────────────────────────────
 
+    // ── All packages ──────────────────────────────────────────────────────────
+
+    /** Searches every package in the Termux repository (name first, then description). */
+    suspend fun searchPackages(query: String): List<TermuxRepo.Pkg> = withContext(Dispatchers.IO) {
+        termuxIndex(TERMUX_INDEX_MAX_AGE_MS)?.second?.search(query) ?: emptyList()
+    }
+
+    /** The catalog language a package is the main part of (e.g. "rust" → rust), or pkg-<name>. */
+    fun toolIdForPackage(name: String): String =
+        registryTools.entries.firstOrNull { (_, obj) ->
+            val arr = obj.optJSONArray("versions") ?: return@firstOrNull false
+            (0 until arr.length()).any { i ->
+                val v = arr.optJSONObject(i) ?: return@any false
+                v.optString("source") == "termux" &&
+                    v.optString("versionPackage").ifEmpty { v.optJSONArray("packages").toStringList().firstOrNull().orEmpty() } == name
+            }
+        }?.key ?: (PACKAGE_PREFIX + name)
+
+    /**
+     * Installs any package from the repository. One the catalog knows (python, rust, …)
+     * goes through its full setup, language server included; anything else is installed
+     * with its dependencies and its own commands are put on the terminal PATH.
+     */
+    suspend fun installPackage(pkg: TermuxRepo.Pkg) {
+        val tool = toolIdForPackage(pkg.name)
+        if (!tool.startsWith(PACKAGE_PREFIX)) {
+            _availableVersions.value.firstOrNull {
+                it.tool == tool && it.source == "termux" && !it.isUnavailable && pkg.name in it.packages
+            }?.let { install(it); return }
+        }
+        install(RemoteVersion(
+            tool = tool, version = versionKey(pkg.version), tag = "v${displayVersion(pkg.version)}",
+            downloadUrl = "", source = "termux", packages = listOf(pkg.name), sizeBytes = pkg.size,
+            label = "Latest",
+        ))
+    }
+
+    /** Key into [installErrors] for a package install started from search. */
+    fun packageErrorKey(pkg: TermuxRepo.Pkg) = errorKey(toolIdForPackage(pkg.name), versionKey(pkg.version))
+
+    fun isPackageInstalled(name: String): Boolean {
+        val tool = toolIdForPackage(name)
+        return File(versionsDir, tool).listFiles()?.any { it.isDirectory && isInstalledDir(tool, it) } == true
+    }
+
+    /**
+     * Whether a failed post-install check should undo the install. A registry-defined
+     * check must pass. Otherwise only "it can't run at all" is fatal; a program that
+     * started but didn't like `--version` (or waited for input) is kept.
+     */
+    private fun isFatal(tool: String, result: VersionChecker.VerifiedVersion): Boolean {
+        if (registryTools[tool]?.optJSONObject("verify") != null) return true
+        val reason = result.errorReason.orEmpty()
+        return reason.startsWith("Android blocked") || reason.startsWith("A library") ||
+            reason.startsWith("A file this runtime") || reason.startsWith("This download is built") ||
+            reason.startsWith("Not Found")
+    }
+
     /** Installs [ver] from whichever source it names, then verifies and activates it. */
     suspend fun install(ver: RemoteVersion) {
         when (ver.source) {
@@ -760,6 +869,9 @@ class BinaryManager(private val context: Context) {
         val finalDir = File(versionsDir, "$tool/$version")
         val marker = File(finalDir, DOWNLOAD_IN_PROGRESS_MARKER)
         val debCache = File(context.cacheDir, "termux-debs")
+        // Commands that came from the requested packages themselves (not dependencies);
+        // used when the registry doesn't say which commands to expose.
+        val rootBinaries = mutableListOf<String>()
         _installErrors.value = _installErrors.value - errorKey(tool, version)
         try {
             setProgress(tool, version, "resolving", 0f)
@@ -774,7 +886,10 @@ class BinaryManager(private val context: Context) {
                         finalDir.deleteRecursively()
                         finalDir.mkdirs()
                         marker.writeText("started at ${System.currentTimeMillis()}")
+                        rootBinaries.clear()
+                        val binDir = File(finalDir, "bin")
                         for (p in pkgs) {
+                            val binsBefore = if (p.name in ver.packages) binDir.list()?.toSet().orEmpty() else emptySet()
                             val deb = File(debCache, p.filename.substringAfterLast('/'))
                             val base = done
                             TermuxRepo.download("$mirror/${p.filename}", deb, p.sha256) { bytes ->
@@ -783,6 +898,9 @@ class BinaryManager(private val context: Context) {
                             done += p.size
                             TermuxRepo.extractDeb(deb, finalDir)
                             deb.delete()
+                            if (p.name in ver.packages) {
+                                rootBinaries += binDir.list().orEmpty().filter { it !in binsBefore }.sorted()
+                            }
                         }
                         TermuxRepo.rewriteShebangs(finalDir)
                         return@withContext pkgs.map { "${it.name}=${it.version}" }
@@ -794,7 +912,7 @@ class BinaryManager(private val context: Context) {
                 throw lastError ?: RuntimeException("No package mirror reachable")
             }
 
-            val manifest = buildManifest(tool, version, "termux", installed)
+            val manifest = buildManifest(tool, version, "termux", installed, ver.packages, rootBinaries)
             manifest.lsp?.npm?.takeIf { it.isNotEmpty() }?.let { npm ->
                 setProgress(tool, version, "language server", 1f)
                 withContext(Dispatchers.IO) { installNpmLanguageServer(finalDir, npm) }
@@ -804,26 +922,35 @@ class BinaryManager(private val context: Context) {
 
             setProgress(tool, version, "verifying", 1f)
             val result = verifyInstall(tool, finalDir)
-            if (!result.isVerified) throw RuntimeException(result.errorReason ?: "The runtime didn't start")
+            if (!result.isVerified && isFatal(tool, result)) throw RuntimeException(result.errorReason ?: "The runtime didn't start")
             finishInstall(tool, version)
         } catch (e: Exception) {
             failInstall(tool, version, e)
             finalDir.deleteRecursively()
+            finalDir.parentFile?.takeIf { it.list().isNullOrEmpty() }?.delete()
         } finally {
             _downloadProgress.value = _downloadProgress.value - version
         }
     }
 
     /** Manifest for an install, from the tool's registry entry. */
-    private fun buildManifest(tool: String, version: String, source: String, packages: List<String>): RuntimeManifest {
+    private fun buildManifest(
+        tool: String,
+        version: String,
+        source: String,
+        packages: List<String>,
+        roots: List<String> = emptyList(),
+        discoveredBinaries: List<String> = emptyList(),
+    ): RuntimeManifest {
         val obj = registryTools[tool] ?: JSONObject()
         return RuntimeManifest(
             tool = tool,
             version = version,
-            displayName = obj.optString("displayName", tool),
+            displayName = obj.optString("displayName", tool.removePrefix(PACKAGE_PREFIX)),
             source = source,
             packages = packages,
-            binaries = obj.optJSONArray("binaries").toStringList(),
+            roots = roots,
+            binaries = obj.optJSONArray("binaries").toStringList().ifEmpty { discoveredBinaries },
             env = obj.optJSONObject("env").toStringMap(),
             languages = obj.optJSONObject("languages").toStringMap().mapKeys { it.key.lowercase().removePrefix(".") },
             lsp = RuntimeManifest.Lsp.fromJson(obj.optJSONObject("lsp")),
@@ -1005,7 +1132,10 @@ class BinaryManager(private val context: Context) {
                 syncActiveVersionToFile(tool, null)
             }
         }
-        withContext(Dispatchers.IO) { File(versionsDir, "$tool/$version").deleteRecursively() }
+        withContext(Dispatchers.IO) {
+            File(versionsDir, "$tool/$version").deleteRecursively()
+            File(versionsDir, tool).takeIf { it.list().isNullOrEmpty() }?.delete()
+        }
         rebuildWrappers()
         syncVersions()
     }

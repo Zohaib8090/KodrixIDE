@@ -28,6 +28,8 @@ import com.kodrix.zohaib.viewmodel.TerminalViewModel
 import com.kodrix.zohaib.bridge.Extension
 import com.kodrix.zohaib.bridge.BinaryManager
 import com.kodrix.zohaib.bridge.VersionChecker
+import com.kodrix.zohaib.runtime.TermuxRepo
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 // ─── Tabs ────────────────────────────────────────────────────────────────────
@@ -289,6 +291,18 @@ private fun RuntimesTab(viewModel: TerminalViewModel, uiScale: Float, searchQuer
         viewModel.binaryManager.syncVersions()
     }
 
+    // Every package in the repository, searched as you type.
+    var packageResults by remember { mutableStateOf<List<TermuxRepo.Pkg>>(emptyList()) }
+    var searchingPackages by remember { mutableStateOf(false) }
+    LaunchedEffect(searchQuery) {
+        val q = searchQuery.trim()
+        if (q.length < 2) { packageResults = emptyList(); return@LaunchedEffect }
+        delay(300)
+        searchingPackages = true
+        packageResults = try { viewModel.binaryManager.searchPackages(q) } catch (_: Exception) { emptyList() }
+        searchingPackages = false
+    }
+
     val metaMap = remember(toolMetas) { toolMetas.associateBy { it.id } }
     val filtered = remember(versions, searchQuery, metaMap) {
         if (searchQuery.isBlank()) versions
@@ -313,10 +327,14 @@ private fun RuntimesTab(viewModel: TerminalViewModel, uiScale: Float, searchQuer
         return
     }
 
-    if (filtered.isEmpty()) {
+    if (filtered.isEmpty() && packageResults.isEmpty()) {
         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
             Text(
-                if (searchQuery.isBlank()) "No runtimes found" else "No results for \"$searchQuery\"",
+                when {
+                    searchingPackages -> "Searching all packages…"
+                    searchQuery.isBlank() -> "No runtimes found"
+                    else -> "No results for \"$searchQuery\""
+                },
                 color = Color.Gray,
                 fontSize = (13 * uiScale).sp
             )
@@ -331,6 +349,16 @@ private fun RuntimesTab(viewModel: TerminalViewModel, uiScale: Float, searchQuer
         contentPadding = PaddingValues(horizontal = (10 * uiScale).dp, vertical = (12 * uiScale).dp),
         verticalArrangement = Arrangement.spacedBy((10 * uiScale).dp)
     ) {
+        if (searchQuery.isBlank()) {
+            item(key = "search_hint") {
+                Text(
+                    "Looking for something else? Search above — every package in the Termux repository (3,000+) can be installed from here.",
+                    color = Color(0xFF8B949E),
+                    fontSize = (10 * uiScale).sp,
+                    lineHeight = (14 * uiScale).sp
+                )
+            }
+        }
         grouped.forEach { (toolName, toolVersions) ->
             val meta = metaMap[toolName]
             val inUse = toolVersions.firstOrNull { it.isActive }
@@ -379,6 +407,30 @@ private fun RuntimesTab(viewModel: TerminalViewModel, uiScale: Float, searchQuer
                     onRemove = {
                         scope.launch { viewModel.binaryManager.uninstall(ver.tool, ver.version) }
                     }
+                )
+            }
+        }
+
+        if (packageResults.isNotEmpty()) {
+            item(key = "pkg_header") {
+                Column(Modifier.padding(top = (8 * uiScale).dp)) {
+                    Text("All packages", color = Color.White, fontSize = (13 * uiScale).sp, fontWeight = FontWeight.Bold)
+                    Text(
+                        "From the Termux repository. Installs with everything it needs; its commands work in the terminal.",
+                        color = Color(0xFF8B949E), fontSize = (10 * uiScale).sp, lineHeight = (14 * uiScale).sp
+                    )
+                }
+            }
+            items(packageResults, key = { "pkg_${it.name}" }) { pkg ->
+                val key = BinaryManager.versionKey(pkg.version)
+                PackageRow(
+                    pkg = pkg,
+                    installed = remember(versions, pkg.name) { viewModel.binaryManager.isPackageInstalled(pkg.name) },
+                    progress = downloadProgress[key],
+                    stage = installStates[key]?.stage,
+                    error = installErrors[viewModel.binaryManager.packageErrorKey(pkg)],
+                    uiScale = uiScale,
+                    onInstall = { scope.launch { viewModel.binaryManager.installPackage(pkg) } }
                 )
             }
         }
@@ -490,6 +542,85 @@ private fun Chip(text: String, color: Color, uiScale: Float, dim: Boolean = fals
             maxLines = 1,
             softWrap = false
         )
+    }
+}
+
+@Composable
+private fun PackageRow(
+    pkg: TermuxRepo.Pkg,
+    installed: Boolean,
+    progress: Float?,
+    stage: String?,
+    error: String?,
+    uiScale: Float,
+    onInstall: () -> Unit
+) {
+    var showFullError by remember(error) { mutableStateOf(false) }
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape((6 * uiScale).dp))
+            .background(Color(0xFF161B22))
+            .padding(horizontal = (10 * uiScale).dp, vertical = (8 * uiScale).dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Column(Modifier.weight(1f)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(pkg.name, color = Color.White, fontSize = (12 * uiScale).sp, fontWeight = FontWeight.SemiBold)
+                Spacer(Modifier.width((6 * uiScale).dp))
+                Text(
+                    "v" + BinaryManager.displayVersion(pkg.version) + formatSize(pkg.size).let { if (it.isEmpty()) "" else " · $it" },
+                    color = Color(0xFF6E7681), fontSize = (9 * uiScale).sp, maxLines = 1
+                )
+            }
+            if (pkg.description.isNotEmpty()) {
+                Text(
+                    pkg.description, color = Color(0xFF8B949E), fontSize = (10 * uiScale).sp,
+                    maxLines = 2, overflow = TextOverflow.Ellipsis
+                )
+            }
+            if (progress != null) {
+                Text(
+                    when (stage) {
+                        "resolving" -> "Preparing…"
+                        "language server" -> "Installing the language server…"
+                        "verifying" -> "Checking it runs…"
+                        else -> "Downloading… ${(progress * 100).toInt()}%"
+                    },
+                    color = Color(0xFF58A6FF), fontSize = (9 * uiScale).sp
+                )
+            }
+            if (error != null) {
+                Text(
+                    text = if (showFullError) error else error.lineSequence().first() + if (error.contains('\n')) "  (tap for details)" else "",
+                    color = Color(0xFFFF7B72),
+                    fontSize = (9 * uiScale).sp,
+                    lineHeight = (13 * uiScale).sp,
+                    modifier = Modifier.clickable { showFullError = !showFullError }
+                )
+            }
+        }
+        Spacer(Modifier.width((8 * uiScale).dp))
+        when {
+            progress != null -> CircularProgressIndicator(
+                modifier = Modifier.size((18 * uiScale).dp),
+                color = Color(0xFF58A6FF),
+                strokeWidth = (2 * uiScale).dp
+            )
+            installed -> Icon(
+                Icons.Default.CheckCircle, contentDescription = "Installed",
+                tint = Color(0xFF3FB950), modifier = Modifier.size((18 * uiScale).dp)
+            )
+            else -> Button(
+                onClick = onInstall,
+                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF238636)),
+                shape = RoundedCornerShape((4 * uiScale).dp),
+                contentPadding = PaddingValues(horizontal = (6 * uiScale).dp, vertical = 0.dp),
+                modifier = Modifier.height((24 * uiScale).dp)
+            ) {
+                Text(if (error != null) "Retry" else "Install", fontSize = (10 * uiScale).sp, color = Color.White, fontWeight = FontWeight.SemiBold)
+            }
+        }
     }
 }
 

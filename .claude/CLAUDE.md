@@ -3,6 +3,11 @@
 Android IDE (Kotlin Multiplatform + Compose) with a built-in terminal, editor with LSP
 autocomplete, and installable language runtimes.
 
+**Mission:** one Android app where anyone can code in many languages with zero setup —
+install the app, pick a language, code. A language only counts as supported when it both
+runs *and* has working autocomplete (LSP). Runtimes and their updates must never need an
+app update. Full mission: `documents/HANDOFF.md` §0.
+
 Start with `documents/HANDOFF.md` (current state, branches, what's untested) and
 `documents/LANGUAGE_PACKS.md` (runtime system design and registry schema).
 

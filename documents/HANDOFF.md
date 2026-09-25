@@ -5,6 +5,40 @@ locally. Read this first; details live in the linked docs.
 
 ---
 
+## 0. The mission (what we're building and why)
+
+In the owner's words: *"install the application, go, select, do my coding thing and all,
+done."* Kodrix should be **one Android app where anyone can code in many languages**, with
+none of the setup a phone normally needs (no Termux app, no manual installs, no config).
+
+What that means in practice (every change should move toward these):
+
+1. **A language "works" only when both halves work:** it runs in the terminal *and* the
+   editor has its language server (autocomplete, errors, go-to-definition). Never advertise
+   a language as supported if its autocomplete doesn't work; say so honestly instead.
+2. **Out of the box:** JavaScript/TypeScript (built-in Node), HTML/CSS/JSON, Shell and Git
+   work with no downloads. Everything else is **one tap** in Marketplace → Runtimes, which
+   installs the runtime *and* its language server.
+3. **The app is independent of runtimes:** new languages, new versions and updates must not
+   need an app update or anyone hand-editing the marketplace. Versions come live from the
+   package repository; the app carries a built-in catalog; the online registry only adds or
+   overrides; several mirrors are tried so one outage doesn't break installs.
+4. **Only what you use is loaded:** installed runtimes can be **paused** (nothing in memory,
+   commands and language server off) and resumed without re-downloading.
+5. **Clear to a non-expert:** plain labels (Built-in / Latest / LTS, not "Current"), and when
+   something fails the user sees the full, explained error — never a cut-off stub.
+6. **Respectful of the phone:** fast startup (nothing slow on the main thread), permissions
+   asked only when needed (camera/mic from the browser, with separate buttons and Skip), the
+   keyboard doesn't shove unrelated panels around.
+7. **Target device:** owner's Samsung, Android 14 (arm64). Android 10+ forbids running
+   downloaded binaries directly — everything must go through the linker64 + shim path
+   (`runtime/RuntimeExec.kt`, `kodrix_exec.c`).
+
+Owner's original wish not yet built: when installing a language, *ask* whether to also
+install its language server (today it's always installed).
+
+---
+
 ## 1. Where the code is
 
 | Repo | Branch with the new work | Merged to `main`? |

@@ -44,16 +44,16 @@ fun BrowserView(viewModel: TerminalViewModel) {
     // Not asked for at app start. The first time the browser opens, a card offers each
     // one separately (or Skip); it comes back if a page asks for one that isn't allowed.
     val context = androidx.compose.ui.platform.LocalContext.current
-    val settings = remember { context.getSharedPreferences("kodrix_settings", android.content.Context.MODE_PRIVATE) }
+    val appPrefs = remember { context.getSharedPreferences("kodrix_settings", android.content.Context.MODE_PRIVATE) }
     fun has(permission: String) = androidx.core.content.ContextCompat.checkSelfPermission(context, permission) ==
         android.content.pm.PackageManager.PERMISSION_GRANTED
     var micGranted by remember { mutableStateOf(has(android.Manifest.permission.RECORD_AUDIO)) }
     var cameraGranted by remember { mutableStateOf(has(android.Manifest.permission.CAMERA)) }
     var showMediaCard by remember {
-        mutableStateOf(!settings.getBoolean(MEDIA_PROMPT_DONE, false) && !(micGranted && cameraGranted))
+        mutableStateOf(!appPrefs.getBoolean(MEDIA_PROMPT_DONE, false) && !(micGranted && cameraGranted))
     }
     fun closeMediaCard() {
-        settings.edit().putBoolean(MEDIA_PROMPT_DONE, true).apply()
+        appPrefs.edit().putBoolean(MEDIA_PROMPT_DONE, true).apply()
         showMediaCard = false
     }
     val micLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { ok ->

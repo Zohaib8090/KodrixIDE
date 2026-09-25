@@ -155,6 +155,8 @@ class BinaryManager(private val context: Context) {
         private const val TERMUX_INDEX_MAX_AGE_MS = 6L * 60 * 60 * 1000
 
         // Bundled default versions — treated as "active" when no user selection exists
+        private const val PAUSED_KEY = "paused_tools"
+
         private val BUNDLED_DEFAULTS = mapOf(
             "node" to Triple("25.8.2", "v25.8.2 (Built-in)", "libnode_bin.so"),
             "git"  to Triple("2.34.0", "v2.34.0 (Built-in)", "libgit_bin.so")
@@ -192,6 +194,39 @@ class BinaryManager(private val context: Context) {
     val installErrors = _installErrors.asStateFlow()
 
     val verifiedVersions = VersionChecker.verifiedVersions
+
+    /**
+     * Installed runtimes the user has paused: kept on disk, but their commands are taken
+     * off the terminal PATH and their language server is not started, so nothing of
+     * theirs is loaded until they are resumed. Built-in tools can't be paused.
+     */
+    private val _pausedTools = MutableStateFlow(prefs.getStringSet(PAUSED_KEY, null)?.toSet() ?: emptySet())
+    val pausedTools = _pausedTools.asStateFlow()
+
+    fun isPaused(tool: String) = tool in _pausedTools.value
+
+    fun setPaused(tool: String, paused: Boolean) {
+        if (tool in BUNDLED_DEFAULTS) return
+        val next = if (paused) _pausedTools.value + tool else _pausedTools.value - tool
+        prefs.edit().putStringSet(PAUSED_KEY, next).apply()
+        _pausedTools.value = next
+        rebuildWrappers()
+    }
+
+    /** The paused runtime that would otherwise handle [extension], if any. */
+    fun pausedToolFor(extension: String): String? {
+        val ext = extension.lowercase()
+        return _pausedTools.value.firstOrNull { tool ->
+            val active = getActiveVersion(tool) ?: return@firstOrNull false
+            RuntimeManifest.readFrom(File(versionsDir, "$tool/$active"))?.languages?.containsKey(ext) == true
+        }
+    }
+
+    /** File extensions the active install of [tool] declares. */
+    fun extensionsOf(tool: String): Set<String> {
+        val active = getActiveVersion(tool) ?: return emptySet()
+        return RuntimeManifest.readFrom(File(versionsDir, "$tool/$active"))?.languages?.keys ?: emptySet()
+    }
 
     /** Raw registry entries by tool id, from the last successful sync (or the cache). */
     @Volatile private var registryTools: Map<String, JSONObject> = emptyMap()
@@ -256,6 +291,7 @@ class BinaryManager(private val context: Context) {
             if (!toolDir.isDirectory) return@forEach
             val toolName = toolDir.name
             if (toolName in BUNDLED_DEFAULTS) return@forEach
+            if (isPaused(toolName)) return@forEach
             val activeVer  = getActiveVersion(toolName) ?: return@forEach
             val installDir = File(versionsDir, "$toolName/$activeVer")
             if (!installDir.isDirectory) return@forEach
@@ -549,7 +585,7 @@ class BinaryManager(private val context: Context) {
     fun languageRuntimeFor(extension: String): LanguageRuntime? {
         val ext = extension.lowercase()
         versionsDir.listFiles()?.forEach { toolDir ->
-            if (!toolDir.isDirectory) return@forEach
+            if (!toolDir.isDirectory || isPaused(toolDir.name)) return@forEach
             val active = getActiveVersion(toolDir.name) ?: return@forEach
             val dir = File(toolDir, active)
             val manifest = RuntimeManifest.readFrom(dir) ?: return@forEach
@@ -827,6 +863,11 @@ class BinaryManager(private val context: Context) {
         showCompletionNotification(tool, version, true)
         _installStates.value = _installStates.value + (version to InstallState(version, "completed", 1f))
         prefs.edit().putString("active_$tool", version).apply()
+        // Installing something is a clear sign it's wanted again.
+        if (isPaused(tool)) {
+            _pausedTools.value = _pausedTools.value - tool
+            prefs.edit().putStringSet(PAUSED_KEY, _pausedTools.value).apply()
+        }
         syncActiveVersionToFile(tool, version)
         rebuildWrappers()
         syncVersions()

@@ -569,6 +569,20 @@ class TerminalViewModel(application: Application) : AndroidViewModel(application
         val ext = file.extension.lowercase()
         if (activeLSPs.containsKey(ext)) return // already running
 
+        // The user paused the runtime for this language: load nothing for it.
+        binaryManager.pausedToolFor(ext)?.let { tool ->
+            if (suggestedRuntimeFor.add("paused:$ext")) {
+                viewModelScope.launch(Dispatchers.Main) {
+                    android.widget.Toast.makeText(
+                        getApplication(),
+                        "$tool is paused — resume it in Marketplace → Runtimes for autocomplete",
+                        android.widget.Toast.LENGTH_LONG
+                    ).show()
+                }
+            }
+            return
+        }
+
         // An installed runtime whose manifest declares this file type wins: its own
         // language server, started generically (no per-language code).
         binaryManager.languageRuntimeFor(ext)?.let { rt ->
@@ -752,6 +766,26 @@ class TerminalViewModel(application: Application) : AndroidViewModel(application
                         android.widget.Toast.LENGTH_LONG
                     ).show()
                 }
+            }
+        }
+    }
+
+    /**
+     * Pauses or resumes an installed runtime. Pausing also shuts down its language
+     * server right away, so it stops using memory without restarting the app.
+     */
+    fun setRuntimePaused(tool: String, paused: Boolean) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val exts = binaryManager.extensionsOf(tool)
+            binaryManager.setPaused(tool, paused)
+            if (paused) {
+                exts.forEach { ext -> activeLSPs.remove(ext)?.stop() }
+                withContext(Dispatchers.Main) {
+                    _lspDiagnostics.value = emptyList()
+                    _completionItems.value = emptyList()
+                }
+            } else {
+                exts.forEach { suggestedRuntimeFor.remove("paused:$it") }
             }
         }
     }

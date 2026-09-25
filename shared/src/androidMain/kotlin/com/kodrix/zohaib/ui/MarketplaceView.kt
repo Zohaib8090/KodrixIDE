@@ -282,6 +282,7 @@ private fun RuntimesTab(viewModel: TerminalViewModel, uiScale: Float, searchQuer
     val installStates by viewModel.binaryManager.installStates.collectAsState()
     val installErrors by viewModel.binaryManager.installErrors.collectAsState()
     val verifiedVersions by viewModel.binaryManager.verifiedVersions.collectAsState()
+    val pausedTools by viewModel.binaryManager.pausedTools.collectAsState()
     val scope = rememberCoroutineScope()
 
     LaunchedEffect(Unit) {
@@ -333,8 +334,17 @@ private fun RuntimesTab(viewModel: TerminalViewModel, uiScale: Float, searchQuer
         grouped.forEach { (toolName, toolVersions) ->
             val meta = metaMap[toolName]
             val inUse = toolVersions.firstOrNull { it.isActive }
+            val paused = toolName in pausedTools
+            // Only downloaded runtimes can be paused; built-in tools are always on.
+            val canPause = toolVersions.none { it.source == "bundled" } &&
+                toolVersions.any { it.isInstalled }
             item(key = "header_$toolName") {
-                RuntimeHeader(meta, toolName, inUse, uiScale)
+                RuntimeHeader(
+                    meta, toolName, inUse, uiScale,
+                    paused = paused,
+                    canPause = canPause,
+                    onTogglePause = { viewModel.setRuntimePaused(toolName, !paused) },
+                )
             }
             items(toolVersions, key = { "${it.tool}_${it.version}_${it.source}" }) { ver ->
                 val key = "${ver.tool}_${ver.version}"
@@ -349,6 +359,7 @@ private fun RuntimesTab(viewModel: TerminalViewModel, uiScale: Float, searchQuer
                     stage = installStates[ver.version]?.stage,
                     error = installErrors[key] ?: verifyError,
                     uiScale = uiScale,
+                    paused = paused,
                     onDownload = {
                         scope.launch { viewModel.binaryManager.install(ver) }
                     },
@@ -375,9 +386,17 @@ private fun RuntimesTab(viewModel: TerminalViewModel, uiScale: Float, searchQuer
 }
 
 @Composable
-private fun RuntimeHeader(meta: BinaryManager.ToolMeta?, toolName: String, inUse: BinaryManager.RemoteVersion?, uiScale: Float) {
+private fun RuntimeHeader(
+    meta: BinaryManager.ToolMeta?,
+    toolName: String,
+    inUse: BinaryManager.RemoteVersion?,
+    uiScale: Float,
+    paused: Boolean = false,
+    canPause: Boolean = false,
+    onTogglePause: () -> Unit = {},
+) {
     Column(modifier = Modifier.padding(top = (8 * uiScale).dp, bottom = (2 * uiScale).dp)) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
+        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
             Box(
                 modifier = Modifier
                     .size((22 * uiScale).dp)
@@ -411,14 +430,37 @@ private fun RuntimeHeader(meta: BinaryManager.ToolMeta?, toolName: String, inUse
             }
             if (meta?.hasLanguageServer == true) {
                 Spacer(Modifier.width((4 * uiScale).dp))
-                Chip("Autocomplete", Color(0xFF3FB950), uiScale)
+                Chip("Autocomplete", Color(0xFF3FB950), uiScale, dim = paused)
+            }
+            Spacer(Modifier.weight(1f))
+            if (canPause) {
+                OutlinedButton(
+                    onClick = onTogglePause,
+                    shape = RoundedCornerShape((4 * uiScale).dp),
+                    border = BorderStroke(1.dp, if (paused) Color(0xFF238636) else Color(0xFF30363D)),
+                    contentPadding = PaddingValues(horizontal = (6 * uiScale).dp, vertical = 0.dp),
+                    modifier = Modifier.height((22 * uiScale).dp)
+                ) {
+                    Icon(
+                        if (paused) Icons.Default.PlayArrow else Icons.Default.Pause, null,
+                        tint = if (paused) Color(0xFF3FB950) else Color(0xFF8B949E),
+                        modifier = Modifier.size((11 * uiScale).dp)
+                    )
+                    Spacer(Modifier.width((3 * uiScale).dp))
+                    Text(
+                        if (paused) "Resume" else "Pause",
+                        fontSize = (9 * uiScale).sp,
+                        color = if (paused) Color(0xFF3FB950) else Color(0xFF8B949E)
+                    )
+                }
             }
         }
         val details = buildList {
             if (meta?.description?.isNotEmpty() == true) add(meta.description)
             if (meta?.extensions?.isNotEmpty() == true) add("Files: " + meta.extensions.joinToString(" ") { ".$it" })
             add(
-                if (inUse == null) "Not installed"
+                if (paused) "Paused — not loaded: its commands and autocomplete are off until you resume it"
+                else if (inUse == null) "Not installed"
                 else "In use: v${inUse.version.removePrefix("v")}" + (if (inUse.source == "bundled") " (built into Kodrix)" else "")
             )
         }
@@ -466,6 +508,7 @@ private fun RuntimeCard(
     stage: String?,
     error: String?,
     uiScale: Float,
+    paused: Boolean = false,
     onDownload: () -> Unit,
     onActivate: () -> Unit,
     onRemove: () -> Unit
@@ -542,7 +585,8 @@ private fun RuntimeCard(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Chip(label, labelColor, uiScale, dim = ver.isUnavailable)
-                    if (ver.isActive) Chip("IN USE", Color(0xFF3FB950), uiScale)
+                    if (ver.isActive && paused) Chip("PAUSED", Color(0xFFD29922), uiScale)
+                    else if (ver.isActive) Chip("IN USE", Color(0xFF3FB950), uiScale)
                 }
                 Spacer(Modifier.height((2 * uiScale).dp))
                 val size = formatSize(ver.sizeBytes)
@@ -556,6 +600,7 @@ private fun RuntimeCard(
                             "extracting" -> "Unpacking…"
                             else -> "Downloading… ${(progress * 100).toInt()}%"
                         }
+                        ver.isActive && paused -> "Paused — tap Resume above to turn it back on"
                         ver.isActive && ver.source == "bundled" -> "In use — built into Kodrix, always available"
                         ver.isActive      -> "In use in the terminal and editor"
                         ver.source == "bundled" -> "Built into Kodrix — tap Use to switch back to it"
@@ -605,9 +650,9 @@ private fun RuntimeCard(
                     strokeWidth = (2 * uiScale).dp
                 )
                 ver.isActive -> Icon(
-                    Icons.Default.CheckCircle,
-                    contentDescription = "In use",
-                    tint = Color(0xFF3FB950),
+                    if (paused) Icons.Default.PauseCircle else Icons.Default.CheckCircle,
+                    contentDescription = if (paused) "Paused" else "In use",
+                    tint = if (paused) Color(0xFFD29922) else Color(0xFF3FB950),
                     modifier = Modifier.size((20 * uiScale).dp)
                 )
                 ver.isInstalled -> Row(verticalAlignment = Alignment.CenterVertically) {

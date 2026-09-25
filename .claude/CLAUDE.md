@@ -18,6 +18,15 @@ Start with `documents/HANDOFF.md` (current state, branches, what's untested) and
   `Zohaib Baig <zohaibbaig144@gmail.com>`, no Claude line) / Me + Claude (same author plus a
   `Co-Authored-By: Claude` line) / Only Claude — and don't push until answered.
 - The owner tests on a Samsung, Android 14 (arm64-v8a); CI builds per-ABI APK artifacts.
+- The owner moves between a Windows PC, new chat sessions, and Termux + proot on their phone.
+  Only the repo travels. When they say **"push for the session"** (or say they're switching
+  device or chat, or going to Termux/proot), use the `push-session` skill
+  (`.claude/skills/push-session/SKILL.md`). It saves every instruction, rule, piece of project
+  info and the current state into this file and `documents/HANDOFF.md`, then commits and
+  pushes. Rules the owner gives in any session apply to all later sessions.
+- The older docs (`documents/CURRENT_TASK.md`, `CLINE_HANDOFF.md`, `CODEBASE.md`,
+  `planning/`) predate the Kotlin Multiplatform layout and use old `app/` paths. Trust
+  HANDOFF.md and LANGUAGE_PACKS.md over them.
 
 ## Layout
 - `shared/src/androidMain/kotlin/com/kodrix/zohaib/` — app code

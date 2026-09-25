@@ -82,7 +82,7 @@ object WrapperManager {
                     val dest   = File(stagingDir, spec.name)
 
                     when (spec.type) {
-                        "symlink" -> writeSymlink(target, dest, cfg)
+                        "symlink" -> writeSymlink(context, target, dest, cfg)
                         "script"  -> writeScriptWrapper(target, dest, spec.interpreter, cfg)
                         else      -> Log.w(TAG, "[${cfg.toolName}] Unknown wrapper type '${spec.type}' for '${spec.name}' — skipping")
                     }
@@ -124,13 +124,20 @@ object WrapperManager {
 
     // ── Private helpers ───────────────────────────────────────────────────────
 
-    private fun writeSymlink(target: File, dest: File, cfg: ToolWrapperConfig) {
+    private fun writeSymlink(context: Context, target: File, dest: File, cfg: ToolWrapperConfig) {
         try {
             if (dest.exists() || isSymlink(dest)) {
                 dest.delete()  // remove old symlink before creating new one
             }
 
-            if (target.exists()) {
+            if (target.exists() && com.kodrix.zohaib.runtime.RuntimeExec.isAppData(context, target)) {
+                // Downloaded runtime: Android won't exec it from app storage, so the
+                // wrapper starts it through the system linker (see RuntimeExec).
+                target.setExecutable(true)
+                dest.writeText(com.kodrix.zohaib.runtime.RuntimeExec.wrapperScript(context, target, cfg.installDir, cfg.env))
+                dest.setExecutable(true)
+                Log.d(TAG, "  linker-wrapper ${dest.name} → ${target.absolutePath}")
+            } else if (target.exists()) {
                 target.setExecutable(true)
                 // Write a shell wrapper script instead of a symlink to configure the library path correctly
                 val targetLibDir = File(target.parentFile?.parentFile, "lib")

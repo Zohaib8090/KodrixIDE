@@ -545,21 +545,55 @@ class TerminalViewModel(application: Application) : AndroidViewModel(application
         "html", "htm" -> "html"
         "css" -> "css"
         "json" -> "json"
-        "js", "javascript" -> "javascript"
-        "ts", "typescript" -> "typescript"
+        "js", "javascript", "mjs", "cjs", "jsx" -> "javascript"
+        "ts", "typescript", "tsx" -> "typescript"
+        "sh", "bash" -> "shellscript"
         // Native language servers (clangd / pylsp) — handled by startNativeLsp()
         "c" -> "c"
         "cpp", "cc", "cxx", "h", "hpp" -> "cpp"
         "py" -> "python"
-        else -> null
+        // Anything else an installed runtime declares in its manifest (Rust, Go, …)
+        else -> binaryManager.languageRuntimeFor(extension)?.languageId
     }
+
+    /** Node.js shipped inside the APK. Always executable, unlike a downloaded one, so
+     *  it runs the JavaScript language servers regardless of the user's active version. */
+    private fun bundledNodeBinary(): java.io.File =
+        java.io.File(getApplication<Application>().applicationInfo.nativeLibraryDir, "libnode_bin.so")
+
+    private val suggestedRuntimeFor = mutableSetOf<String>()
 
     private fun isLspSupported(extension: String) = getLanguageId(extension) != null
 
     private fun startLsp(file: java.io.File) {
         val ext = file.extension.lowercase()
-        val langId = getLanguageId(ext) ?: return
         if (activeLSPs.containsKey(ext)) return // already running
+
+        // An installed runtime whose manifest declares this file type wins: its own
+        // language server, started generically (no per-language code).
+        binaryManager.languageRuntimeFor(ext)?.let { rt ->
+            if (rt.manifest.lsp != null) {
+                startRuntimeLsp(rt, ext, file)
+                return
+            }
+        }
+
+        val langId = getLanguageId(ext)
+        if (langId == null) {
+            // Not supported yet, but a runtime in the Marketplace would add it.
+            binaryManager.installableLanguageFor(ext)?.let { name ->
+                if (suggestedRuntimeFor.add(ext)) {
+                    viewModelScope.launch(Dispatchers.Main) {
+                        android.widget.Toast.makeText(
+                            getApplication(),
+                            "Install $name from Marketplace → Runtimes for autocomplete and run support",
+                            android.widget.Toast.LENGTH_LONG
+                        ).show()
+                    }
+                }
+            }
+            return
+        }
 
         // Route native-binary LSPs (clangd for C/C++, pylsp for Python) away from the Node path
         if (langId == "c" || langId == "cpp" || langId == "python") {
@@ -579,8 +613,11 @@ class TerminalViewModel(application: Application) : AndroidViewModel(application
             "css"  -> listOf("vscode-css-language-server",  "css-languageserver")
             "json" -> listOf("vscode-json-language-server", "json-languageserver")
             "javascript", "typescript" -> listOf("typescript-language-server")
+            "shellscript" -> listOf("bash-language-server")
             else   -> listOf("$langId-languageserver")
         }
+        // bash-language-server uses a subcommand instead of --stdio
+        val lspArgs = if (langId == "shellscript") "start" else "--stdio"
 
         // Check global lsp dir first, then project node_modules — try all name variants
         val lspBin = binaryNames.flatMap { name ->
@@ -601,29 +638,17 @@ class TerminalViewModel(application: Application) : AndroidViewModel(application
         // Ensure the bin file is executable
         lspBin.setExecutable(true)
 
-        // Use findBinary to locate node dynamically
-        val nodeBin = findBinary(getApplication<Application>().filesDir, "node")?.absolutePath
-            ?: run {
-                Log.e("Kodrix", "LSP: node binary not found, cannot start LSP")
-                return
-            }
+        // Always the APK's own Node: a downloaded Node can't be exec'd directly from app
+        // storage, and language servers don't need the user's chosen version.
+        val nodeBin = bundledNodeBinary().absolutePath
         Log.d("Kodrix", "LSP: nodeBin=$nodeBin")
 
         val dnsOverridePath = java.io.File(filesDir, "dns-override.js").absolutePath
 
-        // Inject the active Node.js version paths for LSP execution
-        val activeNodeVersion = binaryManager.getActiveVersion("node")
-        val activeNodeBinDir = if (activeNodeVersion != null)
-            java.io.File(filesDir, "versions/node/$activeNodeVersion/bin").absolutePath else null
-        val activeNodeLibDir = if (activeNodeVersion != null)
-            java.io.File(filesDir, "versions/node/$activeNodeVersion/lib").absolutePath else null
-
         val ldPath = buildString {
-            if (activeNodeLibDir != null) append("$activeNodeLibDir:")
             append("$libLinksDir")
         }
         val pathEnv = buildString {
-            if (activeNodeBinDir != null) append("$activeNodeBinDir:")
             append("$filesDir/usr/bin:$filesDir/bin:$nativeLibPath:/system/bin:/system/xbin")
         }
         val env = mapOf(
@@ -646,7 +671,7 @@ class TerminalViewModel(application: Application) : AndroidViewModel(application
                   "export LD_LIBRARY_PATH='$libLinksDir'; " +
                   "export OPENSSL_CONF=/dev/null; " +
                   "export NODE_OPTIONS='--require $dnsOverridePath'; " +
-                  "exec '$nodeBin' '$lspBinPath' --stdio"
+                  "exec '$nodeBin' '$lspBinPath' $lspArgs"
 
         Log.d("Kodrix", "LSP command: $cmd")
 
@@ -669,6 +694,7 @@ class TerminalViewModel(application: Application) : AndroidViewModel(application
             "json" -> "JSON"
             "javascript" -> "JavaScript"
             "typescript" -> "TypeScript"
+            "shellscript" -> "Shell"
             else -> langId.uppercase()
         }
 
@@ -742,7 +768,7 @@ class TerminalViewModel(application: Application) : AndroidViewModel(application
         val packages = when (langId) {
             "javascript", "typescript" -> "typescript typescript-language-server"
             "html", "css", "json" -> "vscode-langservers-extracted"
-            "bash", "sh" -> "bash-language-server"
+            "bash", "sh", "shellscript" -> "bash-language-server"
             else -> return
         }
 
@@ -751,7 +777,7 @@ class TerminalViewModel(application: Application) : AndroidViewModel(application
             "html" -> "HTML Language Server"
             "css" -> "CSS Language Server"
             "json" -> "JSON Language Server"
-            "bash", "sh" -> "Bash Language Server"
+            "bash", "sh", "shellscript" -> "Bash Language Server"
             else -> "$langId Language Server"
         }
 
@@ -763,8 +789,9 @@ class TerminalViewModel(application: Application) : AndroidViewModel(application
             val nativeLibPath = getApplication<android.app.Application>().applicationInfo.nativeLibraryDir
             val libLinksDir = java.io.File(filesDir, "lib").absolutePath
             val usrBinDir = "${filesDir.absolutePath}/usr/bin"
-            val nodeBin = "$usrBinDir/node"
-            val npmCli = "${filesDir.absolutePath}/npm_pkg/lib/node_modules/npm/bin/npm-cli.js"
+            // The bundled Node and npm: always present and always executable.
+            val nodeBin = bundledNodeBinary().absolutePath
+            val npmCli = "${filesDir.absolutePath}/npm_pkg/bin/npm-cli.js"
             val dnsOverridePath = java.io.File(filesDir, "dns-override.js").absolutePath
 
             if (!java.io.File(nodeBin).exists() || !java.io.File(npmCli).exists()) {
@@ -911,6 +938,50 @@ class TerminalViewModel(application: Application) : AndroidViewModel(application
         }
     }
 
+    /**
+     * Starts the language server an installed runtime declares in its manifest
+     * (`lsp.command`). `${node}` means the Node.js built into the app (for JavaScript
+     * servers like pyright); anything else from the install dir is started through the
+     * system linker, like every other downloaded binary.
+     */
+    private fun startRuntimeLsp(rt: com.kodrix.zohaib.bridge.BinaryManager.LanguageRuntime, ext: String, file: java.io.File) {
+        val lsp = rt.manifest.lsp ?: return
+        viewModelScope.launch(Dispatchers.IO) {
+            val app = getApplication<Application>()
+            val proj = _activeProject.value ?: return@launch
+            val projDir = java.io.File(projectsRoot, proj)
+            val filesDir = app.filesDir.absolutePath
+            val nativeLibPath = app.applicationInfo.nativeLibraryDir
+            val libLinksDir = java.io.File(filesDir, "lib").absolutePath
+            val install = rt.installDir.absolutePath
+            val node = bundledNodeBinary().absolutePath
+            val argv = lsp.command.map { it.replace("\${node}", node).replace("\${install}", install) }
+            val exe = java.io.File(argv.first())
+
+            val command: List<String>
+            val env: Map<String, String>
+            if (exe.absolutePath == node) {
+                // Same launch pattern as the built-in web language servers.
+                val quoted = argv.joinToString(" ") { "'" + it.replace("'", "'\\''") + "'" }
+                command = listOf("/system/bin/sh", "-c",
+                    "export LD_LIBRARY_PATH='$libLinksDir'; export OPENSSL_CONF=/dev/null; exec $quoted")
+                env = mapOf(
+                    "HOME" to filesDir,
+                    "USER" to "kodrix",
+                    "TMPDIR" to java.io.File(filesDir, "tmp").apply { mkdirs() }.absolutePath,
+                    // Wrappers in usr/bin (not the raw ELFs in $install/bin) so a server that
+                    // spawns the language's own tool (pyright → python) gets the linker launch.
+                    "PATH" to "$filesDir/usr/bin:$nativeLibPath:/system/bin:/system/xbin",
+                ) + rt.manifest.env.mapValues { com.kodrix.zohaib.runtime.RuntimeExec.expand(it.value, rt.installDir) }
+            } else {
+                command = com.kodrix.zohaib.runtime.RuntimeExec.command(app, exe, argv.drop(1))
+                env = com.kodrix.zohaib.runtime.RuntimeExec.environment(app, rt.installDir, exe, rt.manifest.env)
+            }
+            Log.d("Kodrix", "Runtime LSP for .$ext (${rt.manifest.tool}): $command")
+            launchLspClient(ext, rt.languageId, file, projDir, command, env, rt.manifest.displayName)
+        }
+    }
+
     /** Starts an [LspClient] with the given command + env and sends initialize/didOpen. */
     private suspend fun launchLspClient(
         ext: String,
@@ -918,7 +989,8 @@ class TerminalViewModel(application: Application) : AndroidViewModel(application
         file: java.io.File,
         projDir: java.io.File,
         command: List<String>,
-        env: Map<String, String>
+        env: Map<String, String>,
+        displayName: String? = null,
     ) {
         val client = LspClient(command = command, workingDir = projDir.absolutePath, env = env)
         client.onDiagnosticsReceived = { params ->
@@ -929,7 +1001,7 @@ class TerminalViewModel(application: Application) : AndroidViewModel(application
         client.start()
         activeLSPs[ext] = client
 
-        val friendlyLang = when (langId) {
+        val friendlyLang = displayName ?: when (langId) {
             "c"      -> "C"
             "cpp"    -> "C++"
             "python" -> "Python"
@@ -1904,20 +1976,11 @@ class TerminalViewModel(application: Application) : AndroidViewModel(application
             val dnsOverridePath = java.io.File(filesDir, "dns-override.js").absolutePath
             val binDir = filesDir.absolutePath
 
-            // Resolve active Node.js version
-            val activeNodeVersion = binaryManager.getActiveVersion("node")
-            val activeNodeBinDir = if (activeNodeVersion != null)
-                java.io.File(filesDir, "versions/node/$activeNodeVersion/bin").absolutePath else null
-            val activeNodeLibDir = if (activeNodeVersion != null)
-                java.io.File(filesDir, "versions/node/$activeNodeVersion/lib").absolutePath else null
-            val activeNpmCli = if (activeNodeVersion != null) {
-                val f = java.io.File(filesDir, "versions/node/$activeNodeVersion/lib/node_modules/npm/bin/npm-cli.js")
-                if (f.exists()) f else null
-            } else null
-
-            // Dynamically detect node and npm-cli.js regardless of version/layout
-            val nodeBin = findBinary(filesDir, "node")
-            val npmScript = activeNpmCli ?: findBinary(filesDir, "npm-cli.js")
+            // The APK's own Node and npm: always present and always executable, whatever
+            // version the user has made active.
+            val nodeBin = bundledNodeBinary().takeIf { it.exists() }
+            val npmScript = java.io.File(filesDir, "npm_pkg/bin/npm-cli.js").takeIf { it.exists() }
+                ?: findBinary(filesDir, "npm-cli.js")
 
             if (nodeBin == null) {
                 withContext(Dispatchers.Main) {
@@ -1960,11 +2023,9 @@ class TerminalViewModel(application: Application) : AndroidViewModel(application
                 env["USER"] = "kodrix"
                 env["TMPDIR"] = java.io.File(filesDir, "tmp").apply { mkdirs() }.absolutePath
                 val ldPath = buildString {
-                    if (activeNodeLibDir != null) append("$activeNodeLibDir:")
                     append("$libLinksDir")
                 }
                 val pathEnv = buildString {
-                    if (activeNodeBinDir != null) append("$activeNodeBinDir:")
                     append("${filesDir.absolutePath}/usr/bin:${filesDir.absolutePath}/bin:$nativeLibPath:/system/bin:/system/xbin")
                 }
                 env["LD_LIBRARY_PATH"] = ldPath
@@ -2397,19 +2458,15 @@ class TerminalViewModel(application: Application) : AndroidViewModel(application
         val nativeLibPath = getApplication<Application>().applicationInfo.nativeLibraryDir
         val libLinksDir = java.io.File(filesDirPath, "lib").absolutePath
 
-        // Resolve active Node.js version from BinaryManager
         val activeNodeVersion = binaryManager.getActiveVersion("node")
-        val activeNodeBinDir = if (activeNodeVersion != null)
-            java.io.File(filesDir, "versions/node/$activeNodeVersion/bin").absolutePath else null
-        val activeNodeLibDir = if (activeNodeVersion != null)
-            java.io.File(filesDir, "versions/node/$activeNodeVersion/lib").absolutePath else null
         val activeNpmCli = if (activeNodeVersion != null) {
             val f = java.io.File(filesDir, "versions/node/$activeNodeVersion/lib/node_modules/npm/bin/npm-cli.js")
             if (f.exists()) f.absolutePath else null
         } else null
 
-        val nodeBin = activeNodeBinDir?.let { "$it/node" }
-            ?: java.io.File(filesDir, "usr/bin/node").absolutePath
+        // The usr/bin/node wrapper starts whichever Node is active the permitted way.
+        val nodeBin = java.io.File(filesDir, "usr/bin/node").takeIf { it.exists() }?.absolutePath
+            ?: bundledNodeBinary().absolutePath
         val npmCli = activeNpmCli
             ?: java.io.File(filesDir, "npm_pkg/bin/npm-cli.js").absolutePath
 
@@ -2420,11 +2477,9 @@ class TerminalViewModel(application: Application) : AndroidViewModel(application
 
         val dnsOverridePath = java.io.File(filesDir, "dns-override.js").absolutePath
         val ldPath = buildString {
-            if (activeNodeLibDir != null) append("$activeNodeLibDir:")
             append("$libLinksDir")
         }
         val pathEnv = buildString {
-            if (activeNodeBinDir != null) append("$activeNodeBinDir:")
             append("${filesDir.absolutePath}/usr/bin:${filesDir.absolutePath}/bin:$nativeLibPath:/system/bin:/system/xbin")
         }
         val env = pb.environment()
@@ -3608,19 +3663,10 @@ class TerminalViewModel(application: Application) : AndroidViewModel(application
         val nativeLibPath = context.applicationInfo.nativeLibraryDir
         val libLinksDir = java.io.File(context.filesDir, "lib").absolutePath
 
-        // Inject the active Node.js version's bin/ and lib/ dirs if available
-        val activeNodeVersion = binaryManager.getActiveVersion("node")
-        val activeNodeBinDir = if (activeNodeVersion != null) {
-            java.io.File(context.filesDir, "versions/node/$activeNodeVersion/bin").absolutePath
-        } else null
-        val activeNodeLibDir = if (activeNodeVersion != null) {
-            java.io.File(context.filesDir, "versions/node/$activeNodeVersion/lib").absolutePath
-        } else null
-
-        val newPath = buildString {
-            if (activeNodeBinDir != null) append("$activeNodeBinDir:")
-            append("$binDir/usr/bin:$binDir/bin:$binDir/usr/git-exec:/system/bin:/system/xbin:/vendor/bin")
-        }
+        // Downloaded runtimes (a newer Node, Rust, …) are reached only through their
+        // usr/bin wrappers, which start them the way Android allows. Their raw bin/ dirs
+        // must not be on PATH: exec'ing those files directly is blocked.
+        val newPath = "$binDir/usr/bin:$binDir/bin:$binDir/usr/git-exec:/system/bin:/system/xbin:/vendor/bin"
         val envPath = "$binDir/init.sh"
 
         val envList = mutableListOf(
@@ -3632,8 +3678,7 @@ class TerminalViewModel(application: Application) : AndroidViewModel(application
             "GIT_EXEC_PATH=$nativeLibPath",
             "ENV=$envPath"
         )
-        if (activeNodeLibDir != null) envList.add("LD_LIBRARY_PATH=$activeNodeLibDir:$libLinksDir")
-        else envList.add("LD_LIBRARY_PATH=$libLinksDir")
+        envList.add("LD_LIBRARY_PATH=$libLinksDir")
         _githubUser.value?.let { envList.add("KODRIX_GH_USER=$it") }
         _githubToken.value?.let { envList.add("KODRIX_GH_TOKEN=$it") }
 
@@ -3843,51 +3888,27 @@ class TerminalViewModel(application: Application) : AndroidViewModel(application
         _isPanelVisible.value = true
     }
 
-    // ── Python Onboarding Setup ───────────────────────────────────────────────
-    private val _showPythonOnboarding = MutableStateFlow(
-        prefs.getBoolean("first_time_python_prompt", true)
-    )
-    val showPythonOnboarding = _showPythonOnboarding.asStateFlow()
+    // ── First-run welcome ─────────────────────────────────────────────────────
+    // Shown once. It lists what works with no downloads and points at
+    // Marketplace → Runtimes for everything else (nothing is installed from here).
+    private val _showWelcome = MutableStateFlow(!prefs.getBoolean("welcome_seen_v2", false))
+    val showWelcome = _showWelcome.asStateFlow()
 
-    fun dismissPythonOnboarding() {
-        prefs.edit().putBoolean("first_time_python_prompt", false).apply()
-        _showPythonOnboarding.value = false
+    fun dismissWelcome() {
+        prefs.edit().putBoolean("welcome_seen_v2", true).apply()
+        _showWelcome.value = false
     }
 
-    fun installPythonInBackground() {
-        viewModelScope.launch(Dispatchers.IO) {
-            val abi = android.os.Build.SUPPORTED_ABIS.firstOrNull() ?: "arm64-v8a"
-            val url = when (abi) {
-                "armeabi-v7a" -> "https://github.com/Zohaib8090/KodrixMarketplace/releases/download/v1.0/python-3.13.13-armeabi-v7a.zip"
-                "x86" -> "https://github.com/Zohaib8090/KodrixMarketplace/releases/download/v1.0/python-3.13.13-x86.zip"
-                "x86_64" -> "https://github.com/Zohaib8090/KodrixMarketplace/releases/download/v1.0/python-3.13.13-x86_64.zip"
-                else -> "https://github.com/Zohaib8090/KodrixMarketplace/releases/download/v1.0/python-3.13.13-arm64-v8a.zip"
-            }
-            
-            try {
-                // Download and extract
-                binaryManager.downloadVersion("python", "3.13.13", url)
-                // Set as active
-                binaryManager.setActiveVersion("python", "3.13.13")
-                
-                withContext(Dispatchers.Main) {
-                    android.widget.Toast.makeText(
-                        getApplication(),
-                        "✅ Python 3.13.13 installed & activated successfully!",
-                        android.widget.Toast.LENGTH_LONG
-                    ).show()
-                }
-            } catch (e: Exception) {
-                Log.e("TerminalViewModel", "Failed to install Python in background", e)
-                withContext(Dispatchers.Main) {
-                    android.widget.Toast.makeText(
-                        getApplication(),
-                        "❌ Background Python installation failed: ${e.message}",
-                        android.widget.Toast.LENGTH_LONG
-                    ).show()
-                }
-            }
-        }
+    /** Set when something asks the Marketplace to open on its Runtimes tab. */
+    private val _openRuntimesTab = MutableStateFlow(false)
+    val openRuntimesTab = _openRuntimesTab.asStateFlow()
+    fun consumeOpenRuntimesTab() { _openRuntimesTab.value = false }
+
+    fun openRuntimesMarketplace() {
+        _openRuntimesTab.value = true
+        _sidebarMode.value = SidebarMode.MARKETPLACE
+        scanMarketplace()
+        _sidebarOpen.value = true
     }
 
     override fun onCleared() {

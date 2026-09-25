@@ -41,6 +41,14 @@ fun MarketplaceView(viewModel: TerminalViewModel) {
 
     var selectedTab by remember { mutableStateOf(MarketplaceTab.EXTENSIONS) }
     var searchQuery by remember { mutableStateOf("") }
+    val openRuntimes by viewModel.openRuntimesTab.collectAsState()
+    LaunchedEffect(openRuntimes) {
+        if (openRuntimes) {
+            selectedTab = MarketplaceTab.RUNTIMES
+            searchQuery = ""
+            viewModel.consumeOpenRuntimesTab()
+        }
+    }
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -271,6 +279,8 @@ private fun RuntimesTab(viewModel: TerminalViewModel, uiScale: Float, searchQuer
     val toolMetas by viewModel.binaryManager.toolMetas.collectAsState()
     val isSyncing by viewModel.binaryManager.isSyncing.collectAsState()
     val downloadProgress by viewModel.binaryManager.downloadProgress.collectAsState()
+    val installStates by viewModel.binaryManager.installStates.collectAsState()
+    val installErrors by viewModel.binaryManager.installErrors.collectAsState()
     val verifiedVersions by viewModel.binaryManager.verifiedVersions.collectAsState()
     val scope = rememberCoroutineScope()
 
@@ -278,11 +288,16 @@ private fun RuntimesTab(viewModel: TerminalViewModel, uiScale: Float, searchQuer
         viewModel.binaryManager.syncVersions()
     }
 
-    val filtered = remember(versions, searchQuery) {
+    val metaMap = remember(toolMetas) { toolMetas.associateBy { it.id } }
+    val filtered = remember(versions, searchQuery, metaMap) {
         if (searchQuery.isBlank()) versions
         else versions.filter {
+            val meta = metaMap[it.tool]
             it.version.contains(searchQuery, ignoreCase = true) ||
-            it.tag.contains(searchQuery, ignoreCase = true)
+            it.tag.contains(searchQuery, ignoreCase = true) ||
+            it.tool.contains(searchQuery, ignoreCase = true) ||
+            (meta?.displayName?.contains(searchQuery, ignoreCase = true) == true) ||
+            (meta?.extensions?.any { ext -> ext.equals(searchQuery.removePrefix("."), ignoreCase = true) } == true)
         }
     }
 
@@ -291,7 +306,7 @@ private fun RuntimesTab(viewModel: TerminalViewModel, uiScale: Float, searchQuer
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
                 CircularProgressIndicator(color = Color(0xFF58A6FF))
                 Spacer(Modifier.height((12 * uiScale).dp))
-                Text("Fetching Node.js versions...", color = Color.Gray, fontSize = (13 * uiScale).sp)
+                Text("Loading languages and runtimes…", color = Color.Gray, fontSize = (13 * uiScale).sp)
             }
         }
         return
@@ -300,7 +315,7 @@ private fun RuntimesTab(viewModel: TerminalViewModel, uiScale: Float, searchQuer
     if (filtered.isEmpty()) {
         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
             Text(
-                if (searchQuery.isBlank()) "No versions found" else "No results for \"$searchQuery\"",
+                if (searchQuery.isBlank()) "No runtimes found" else "No results for \"$searchQuery\"",
                 color = Color.Gray,
                 fontSize = (13 * uiScale).sp
             )
@@ -308,11 +323,7 @@ private fun RuntimesTab(viewModel: TerminalViewModel, uiScale: Float, searchQuer
         return
     }
 
-    // Group versions by tool for registry-driven sections
-    val grouped = remember(filtered, toolMetas) {
-        filtered.groupBy { it.tool }
-    }
-    val metaMap = remember(toolMetas) { toolMetas.associateBy { it.id } }
+    val grouped = remember(filtered) { filtered.groupBy { it.tool } }
 
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
@@ -321,65 +332,25 @@ private fun RuntimesTab(viewModel: TerminalViewModel, uiScale: Float, searchQuer
     ) {
         grouped.forEach { (toolName, toolVersions) ->
             val meta = metaMap[toolName]
-            // Tool section header
+            val inUse = toolVersions.firstOrNull { it.isActive }
             item(key = "header_$toolName") {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier.padding(top = (8 * uiScale).dp, bottom = (2 * uiScale).dp)
-                ) {
-                    // Tool icon from registry
-                    Box(
-                        modifier = Modifier
-                            .size((22 * uiScale).dp)
-                            .clip(RoundedCornerShape((5 * uiScale).dp))
-                            .background(Color(0xFF21262D)),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        if (meta?.iconUrl?.isNotEmpty() == true) {
-                            AsyncImage(
-                                model = meta.iconUrl,
-                                contentDescription = null,
-                                modifier = Modifier.fillMaxSize(),
-                                contentScale = ContentScale.Crop
-                            )
-                        } else {
-                            Icon(Icons.Default.SettingsEthernet, null,
-                                tint = Color(0xFF58A6FF),
-                                modifier = Modifier.size((13 * uiScale).dp))
-                        }
-                    }
-                    Spacer(Modifier.width((6 * uiScale).dp))
-                    Text(
-                        meta?.displayName ?: toolName,
-                        color = Color.White,
-                        fontSize = (13 * uiScale).sp,
-                        fontWeight = FontWeight.Bold
-                    )
-                    Spacer(Modifier.width((6 * uiScale).dp))
-                    if (meta?.category?.isNotEmpty() == true) {
-                        Box(
-                            modifier = Modifier
-                                .clip(RoundedCornerShape((4 * uiScale).dp))
-                                .background(Color(0xFF1F6FEB).copy(alpha = 0.15f))
-                                .padding(horizontal = (5 * uiScale).dp, vertical = (1 * uiScale).dp)
-                        ) {
-                            Text(meta.category, color = Color(0xFF58A6FF),
-                                fontSize = (9 * uiScale).sp, fontWeight = FontWeight.SemiBold)
-                        }
-                    }
-                }
+                RuntimeHeader(meta, toolName, inUse, uiScale)
             }
-            items(toolVersions, key = { "${it.tool}_${it.version}" }) { ver ->
+            items(toolVersions, key = { "${it.tool}_${it.version}_${it.source}" }) { ver ->
+                val key = "${ver.tool}_${ver.version}"
+                val verified = verifiedVersions[ver.tool]
+                val verifyError = verified?.takeIf {
+                    !it.isVerified && it.version.trimStart('v') == ver.version.trimStart('v')
+                }?.errorReason
                 RuntimeCard(
                     ver = ver,
                     toolIconUrl = meta?.iconUrl ?: "",
                     progress = downloadProgress[ver.version],
-                    verifiedVersion = verifiedVersions[ver.tool],
+                    stage = installStates[ver.version]?.stage,
+                    error = installErrors[key] ?: verifyError,
                     uiScale = uiScale,
                     onDownload = {
-                        scope.launch {
-                            viewModel.binaryManager.downloadVersion(ver.tool, ver.version, ver.downloadUrl, ver.sha256)
-                        }
+                        scope.launch { viewModel.binaryManager.install(ver) }
                     },
                     onActivate = {
                         scope.launch {
@@ -388,11 +359,14 @@ private fun RuntimesTab(viewModel: TerminalViewModel, uiScale: Float, searchQuer
                             } catch (e: Exception) {
                                 android.widget.Toast.makeText(
                                     viewModel.getApplication(),
-                                    "⚠️ ${e.message ?: "Failed to activate"}",
+                                    e.message ?: "Failed to switch version",
                                     android.widget.Toast.LENGTH_LONG
                                 ).show()
                             }
                         }
+                    },
+                    onRemove = {
+                        scope.launch { viewModel.binaryManager.uninstall(ver.tool, ver.version) }
                     }
                 )
             }
@@ -401,24 +375,109 @@ private fun RuntimesTab(viewModel: TerminalViewModel, uiScale: Float, searchQuer
 }
 
 @Composable
+private fun RuntimeHeader(meta: BinaryManager.ToolMeta?, toolName: String, inUse: BinaryManager.RemoteVersion?, uiScale: Float) {
+    Column(modifier = Modifier.padding(top = (8 * uiScale).dp, bottom = (2 * uiScale).dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Box(
+                modifier = Modifier
+                    .size((22 * uiScale).dp)
+                    .clip(RoundedCornerShape((5 * uiScale).dp))
+                    .background(Color(0xFF21262D)),
+                contentAlignment = Alignment.Center
+            ) {
+                if (meta?.iconUrl?.isNotEmpty() == true) {
+                    AsyncImage(
+                        model = meta.iconUrl,
+                        contentDescription = null,
+                        modifier = Modifier.fillMaxSize(),
+                        contentScale = ContentScale.Crop
+                    )
+                } else {
+                    Icon(Icons.Default.SettingsEthernet, null,
+                        tint = Color(0xFF58A6FF),
+                        modifier = Modifier.size((13 * uiScale).dp))
+                }
+            }
+            Spacer(Modifier.width((6 * uiScale).dp))
+            Text(
+                meta?.displayName ?: toolName,
+                color = Color.White,
+                fontSize = (13 * uiScale).sp,
+                fontWeight = FontWeight.Bold
+            )
+            Spacer(Modifier.width((6 * uiScale).dp))
+            if (meta?.category?.isNotEmpty() == true) {
+                Chip(meta.category, Color(0xFF58A6FF), uiScale)
+            }
+            if (meta?.hasLanguageServer == true) {
+                Spacer(Modifier.width((4 * uiScale).dp))
+                Chip("Autocomplete", Color(0xFF3FB950), uiScale)
+            }
+        }
+        val details = buildList {
+            if (meta?.description?.isNotEmpty() == true) add(meta.description)
+            if (meta?.extensions?.isNotEmpty() == true) add("Files: " + meta.extensions.joinToString(" ") { ".$it" })
+            add(
+                if (inUse == null) "Not installed"
+                else "In use: v${inUse.version.removePrefix("v")}" + (if (inUse.source == "bundled") " (built into Kodrix)" else "")
+            )
+        }
+        Spacer(Modifier.height((3 * uiScale).dp))
+        Text(
+            details.joinToString(" · "),
+            color = Color(0xFF8B949E),
+            fontSize = (10 * uiScale).sp,
+            lineHeight = (14 * uiScale).sp
+        )
+    }
+}
+
+@Composable
+private fun Chip(text: String, color: Color, uiScale: Float, dim: Boolean = false) {
+    Box(
+        modifier = Modifier
+            .clip(RoundedCornerShape((4 * uiScale).dp))
+            .background(color.copy(alpha = if (dim) 0.08f else 0.16f))
+            .padding(horizontal = (5 * uiScale).dp, vertical = (2 * uiScale).dp)
+    ) {
+        Text(
+            text = text,
+            color = if (dim) color.copy(alpha = 0.45f) else color,
+            fontSize = (9 * uiScale).sp,
+            fontWeight = FontWeight.SemiBold,
+            maxLines = 1,
+            softWrap = false
+        )
+    }
+}
+
+private fun formatSize(bytes: Long): String = when {
+    bytes <= 0 -> ""
+    bytes >= 1_000_000_000 -> "%.1f GB".format(bytes / 1e9)
+    bytes >= 1_000_000 -> "${bytes / 1_000_000} MB"
+    else -> "${maxOf(1, bytes / 1_000)} KB"
+}
+
+@Composable
 private fun RuntimeCard(
     ver: BinaryManager.RemoteVersion,
     toolIconUrl: String,
     progress: Float?,
-    verifiedVersion: VersionChecker.VerifiedVersion?,
+    stage: String?,
+    error: String?,
     uiScale: Float,
     onDownload: () -> Unit,
-    onActivate: () -> Unit
+    onActivate: () -> Unit,
+    onRemove: () -> Unit
 ) {
-    val tagColor = when {
-        ver.tag.contains("Current",   ignoreCase = true) -> Color(0xFF238636)
-        ver.tag.contains("LTS",       ignoreCase = true) -> Color(0xFF1F6FEB)
-        ver.tag.contains("Bundled",   ignoreCase = true) -> Color(0xFF58A6FF)
-        ver.tag.contains("Jod",       ignoreCase = true) ||
-        ver.tag.contains("Iron",      ignoreCase = true) ||
-        ver.tag.contains("Hydrogen",  ignoreCase = true) -> Color(0xFFBB8009)
-        else -> Color(0xFF6E7681)
+    val label = ver.label.ifEmpty { BinaryManager.friendlyLabel(ver.tag, ver.source) }
+    val labelColor = when (label) {
+        "Built-in" -> Color(0xFF58A6FF)
+        "Latest"   -> Color(0xFFA371F7)
+        "LTS"      -> Color(0xFF1F6FEB)
+        else       -> Color(0xFF6E7681)
     }
+    var showFullError by remember(error) { mutableStateOf(false) }
 
     Card(
         modifier = Modifier.fillMaxWidth(),
@@ -430,6 +489,7 @@ private fun RuntimeCard(
             width = 1.dp,
             color = when {
                 ver.isUnavailable -> Color(0xFF21262D)
+                error != null     -> Color(0xFFDA3633).copy(alpha = 0.6f)
                 ver.isActive      -> Color(0xFF238636)
                 progress != null  -> Color(0xFF1F6FEB)
                 else              -> Color(0xFF30363D)
@@ -442,7 +502,6 @@ private fun RuntimeCard(
                 .padding(horizontal = (10 * uiScale).dp, vertical = (10 * uiScale).dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            // Tool icon — from registry iconUrl, falls back to emoji
             Box(
                 modifier = Modifier
                     .size((34 * uiScale).dp)
@@ -458,20 +517,18 @@ private fun RuntimeCard(
                         contentScale = ContentScale.Crop
                     )
                 } else {
-                    Text(
-                        "⬡",
-                        color = if (ver.isUnavailable) Color(0xFF3D4047) else Color(0xFF68A063),
-                        fontSize = (14 * uiScale).sp
-                    )
+                    Text("⬡", color = if (ver.isUnavailable) Color(0xFF3D4047) else Color(0xFF68A063), fontSize = (14 * uiScale).sp)
                 }
             }
 
             Spacer(Modifier.width((8 * uiScale).dp))
 
-            // Text column — weight(1f) prevents overflow into button area
             Column(modifier = Modifier.weight(1f)) {
                 Text(
-                    text = if (ver.isUnavailable) ver.tag else "v${ver.version}",
+                    text = when {
+                        ver.version.isEmpty() -> ver.tag
+                        else -> "v${ver.version.removePrefix("v")}"
+                    },
                     color = if (ver.isUnavailable) Color(0xFF484F58) else Color.White,
                     fontSize = (13 * uiScale).sp,
                     fontWeight = FontWeight.Bold,
@@ -480,135 +537,61 @@ private fun RuntimeCard(
                     overflow = TextOverflow.Ellipsis
                 )
                 Spacer(Modifier.height((2 * uiScale).dp))
-                // Badges on their own row — never squeeze the title
                 Row(
                     horizontalArrangement = Arrangement.spacedBy((4 * uiScale).dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Box(
-                        modifier = Modifier
-                            .clip(RoundedCornerShape((4 * uiScale).dp))
-                            .background(tagColor.copy(alpha = if (ver.isUnavailable) 0.08f else 0.18f))
-                            .padding(horizontal = (5 * uiScale).dp, vertical = (2 * uiScale).dp)
-                    ) {
-                        Text(
-                            text = ver.tag,
-                            color = if (ver.isUnavailable) tagColor.copy(alpha = 0.45f) else tagColor,
-                            fontSize = (9 * uiScale).sp,
-                            fontWeight = FontWeight.SemiBold,
-                            maxLines = 1,
-                            softWrap = false
-                        )
-                    }
-                    if (ver.isActive) {
-                        Box(
-                            modifier = Modifier
-                                .clip(RoundedCornerShape((4 * uiScale).dp))
-                                .background(Color(0xFF238636).copy(alpha = 0.18f))
-                                .padding(horizontal = (5 * uiScale).dp, vertical = (2 * uiScale).dp)
-                        ) {
-                            Text(
-                                text = "ACTIVE",
-                                color = Color(0xFF3FB950),
-                                fontSize = (9 * uiScale).sp,
-                                fontWeight = FontWeight.Bold,
-                                maxLines = 1,
-                                softWrap = false
-                            )
-                        }
-                    }
+                    Chip(label, labelColor, uiScale, dim = ver.isUnavailable)
+                    if (ver.isActive) Chip("IN USE", Color(0xFF3FB950), uiScale)
                 }
                 Spacer(Modifier.height((2 * uiScale).dp))
+                val size = formatSize(ver.sizeBytes)
                 Text(
                     text = when {
-                        ver.isUnavailable -> "Not yet available"
-                        ver.isActive      -> "Active"
-                        ver.isInstalled   -> "Installed"
-                        else              -> "Available"
+                        ver.isUnavailable -> ver.note.ifEmpty { "Not available" }
+                        progress != null  -> when (stage) {
+                            "resolving" -> "Preparing…"
+                            "language server" -> "Installing the language server…"
+                            "verifying" -> "Checking it runs…"
+                            "extracting" -> "Unpacking…"
+                            else -> "Downloading… ${(progress * 100).toInt()}%"
+                        }
+                        ver.isActive && ver.source == "bundled" -> "In use — built into Kodrix, always available"
+                        ver.isActive      -> "In use in the terminal and editor"
+                        ver.source == "bundled" -> "Built into Kodrix — tap Use to switch back to it"
+                        ver.isInstalled   -> "Downloaded — tap Use to switch to it"
+                        size.isNotEmpty() -> "Not downloaded · $size"
+                        else              -> "Not downloaded"
                     },
-                    color = if (ver.isUnavailable) Color(0xFF3D4047) else Color.Gray,
+                    color = if (ver.isUnavailable) Color(0xFF6E7681) else Color.Gray,
                     fontSize = (9 * uiScale).sp,
-                    maxLines = 1,
-                    softWrap = false,
+                    maxLines = 2,
                     overflow = TextOverflow.Ellipsis
                 )
-                // Note text for unavailable slots
-                if (ver.isUnavailable && ver.note.isNotEmpty()) {
-                    Spacer(Modifier.height((3 * uiScale).dp))
-                    Text(
-                        text = ver.note,
-                        color = Color(0xFF3D4047),
-                        fontSize = (8 * uiScale).sp,
-                        maxLines = 2,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                }
-                // Verification chip — only show when the checked version matches THIS card
-                // Keyed by tool, so we must compare version strings to avoid cross-card bleed
-                val isThisVersionVerified = verifiedVersion != null &&
-                    verifiedVersion.version.trimStart('v') == ver.version.trimStart('v')
-                if (ver.isInstalled && isThisVersionVerified) {
+                if (error != null) {
                     Spacer(Modifier.height((4 * uiScale).dp))
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy((3 * uiScale).dp)
-                    ) {
-                        if (verifiedVersion!!.isVerified) {
-                            Box(
-                                modifier = Modifier
-                                    .clip(RoundedCornerShape((3 * uiScale).dp))
-                                    .background(Color(0xFF238636).copy(alpha = 0.18f))
-                                    .padding(horizontal = (5 * uiScale).dp, vertical = (2 * uiScale).dp)
-                            ) {
-                                Text(
-                                    text = "✓ ${verifiedVersion.version}",
-                                    color = Color(0xFF3FB950),
-                                    fontSize = (9 * uiScale).sp,
-                                    fontWeight = FontWeight.SemiBold,
-                                    maxLines = 1,
-                                    softWrap = false
-                                )
-                            }
-                        } else {
-                            Box(
-                                modifier = Modifier
-                                    .clip(RoundedCornerShape((3 * uiScale).dp))
-                                    .background(Color(0xFFB08800).copy(alpha = 0.18f))
-                                    .padding(horizontal = (5 * uiScale).dp, vertical = (2 * uiScale).dp)
-                            ) {
-                                Text(
-                                    text = "⚠ ${verifiedVersion.errorReason ?: "Failed"}",
-                                    color = Color(0xFFD29922),
-                                    fontSize = (9 * uiScale).sp,
-                                    fontWeight = FontWeight.SemiBold,
-                                    maxLines = 1,
-                                    softWrap = false
-                                )
-                            }
-                        }
-                    }
+                    Text(
+                        text = if (showFullError) error else error.lineSequence().first() + if (error.contains('\n')) "  (tap for details)" else "",
+                        color = Color(0xFFFF7B72),
+                        fontSize = (9 * uiScale).sp,
+                        lineHeight = (13 * uiScale).sp,
+                        fontFamily = if (showFullError) androidx.compose.ui.text.font.FontFamily.Monospace else null,
+                        modifier = Modifier.clickable { showFullError = !showFullError }
+                    )
                 }
                 if (progress != null) {
                     Spacer(Modifier.height((6 * uiScale).dp))
                     LinearProgressIndicator(
-                        progress = progress,
+                        progress = { progress },
                         modifier = Modifier.fillMaxWidth().height((3 * uiScale).dp).clip(RoundedCornerShape((2 * uiScale).dp)),
                         color = Color(0xFF58A6FF),
                         trackColor = Color(0xFF30363D)
-                    )
-                    Text(
-                        "Downloading\u2026 ${(progress * 100).toInt()}%",
-                        color = Color(0xFF58A6FF),
-                        fontSize = (9 * uiScale).sp,
-                        maxLines = 1,
-                        softWrap = false
                     )
                 }
             }
 
             Spacer(Modifier.width((8 * uiScale).dp))
 
-            // Fixed-size action — never pushes text column
             when {
                 ver.isUnavailable -> Icon(
                     Icons.Default.Lock,
@@ -623,18 +606,25 @@ private fun RuntimeCard(
                 )
                 ver.isActive -> Icon(
                     Icons.Default.CheckCircle,
-                    contentDescription = "Active",
+                    contentDescription = "In use",
                     tint = Color(0xFF3FB950),
                     modifier = Modifier.size((20 * uiScale).dp)
                 )
-                ver.isInstalled -> Button(
-                    onClick = onActivate,
-                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1F6FEB)),
-                    shape = RoundedCornerShape((4 * uiScale).dp),
-                    contentPadding = PaddingValues(horizontal = (8 * uiScale).dp, vertical = 0.dp),
-                    modifier = Modifier.height((24 * uiScale).dp)
-                ) {
-                    Text("Use", fontSize = (10 * uiScale).sp, color = Color.White, fontWeight = FontWeight.SemiBold)
+                ver.isInstalled -> Row(verticalAlignment = Alignment.CenterVertically) {
+                    if (ver.source != "bundled") {
+                        IconButton(onClick = onRemove, modifier = Modifier.size((24 * uiScale).dp)) {
+                            Icon(Icons.Default.Delete, "Remove", tint = Color(0xFF8B949E), modifier = Modifier.size((14 * uiScale).dp))
+                        }
+                    }
+                    Button(
+                        onClick = onActivate,
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1F6FEB)),
+                        shape = RoundedCornerShape((4 * uiScale).dp),
+                        contentPadding = PaddingValues(horizontal = (8 * uiScale).dp, vertical = 0.dp),
+                        modifier = Modifier.height((24 * uiScale).dp)
+                    ) {
+                        Text("Use", fontSize = (10 * uiScale).sp, color = Color.White, fontWeight = FontWeight.SemiBold)
+                    }
                 }
                 else -> Button(
                     onClick = onDownload,
@@ -645,7 +635,7 @@ private fun RuntimeCard(
                 ) {
                     Icon(Icons.Default.Download, null, modifier = Modifier.size((10 * uiScale).dp), tint = Color.White)
                     Spacer(Modifier.width((3 * uiScale).dp))
-                    Text("Get", fontSize = (10 * uiScale).sp, color = Color.White, fontWeight = FontWeight.SemiBold)
+                    Text(if (error != null) "Retry" else "Install", fontSize = (10 * uiScale).sp, color = Color.White, fontWeight = FontWeight.SemiBold)
                 }
             }
         }

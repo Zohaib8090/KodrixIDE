@@ -447,3 +447,66 @@ Phase 7 is the real acceptance test of the whole design.
 | 6 | Minimum Android version for language packs | Open — default: Android 10 (API 29) |
 | 7 | Phase 0 test device | **Decided:** owner's Samsung, Android 14 |
 | 8 | Python LSP: `jedi-language-server` (pure Python) vs `pylsp` (needs a C compiler for `ujson`) | Open — default: `jedi-language-server` |
+
+---
+
+## 18. What shipped: registry schema v2 (how to add a language without an app update)
+
+Runtimes are now described entirely by `versions.json` in the KodrixMarketplace repo.
+The app fetches it from the first mirror that answers (raw.githubusercontent → jsDelivr →
+github.com/raw, plus any `_config.registryMirrors`), caches it in
+`files/registry/versions.json`, and uses a minimal built-in copy only as a last resort.
+
+### Adding a language
+
+Add a top-level key. No app change is needed as long as the language's compiler/interpreter
+and language server exist in the Termux repository (or are npm packages):
+
+```json
+"rust": {
+  "displayName": "Rust",
+  "category": "Compiler",
+  "iconUrl": "https://…/icons/rust.png",
+  "description": "Shown under the name in Marketplace → Runtimes.",
+  "languages": { "rs": "rust" },                  // file extension → LSP languageId
+  "binaries": ["rustc", "cargo", "lua=lua5.4"],   // put on the terminal PATH; name=target aliases
+  "env": { "GOROOT": "${install}/lib/go" },       // ${install} = this runtime's install dir
+  "lsp": {
+    "command": ["${install}/bin/rust-analyzer"],  // or ["${node}", "${install}/lsp/node_modules/…", "--stdio"]
+    "npm": ["pyright"]                            // optional: JS servers installed with the built-in Node
+  },
+  "verify": { "command": ["${install}/bin/rustc", "--version"] },
+  "versions": [
+    { "version": "latest", "tag": "Latest", "status": "available",
+      "source": "termux", "packages": ["rust", "rust-src", "rust-analyzer"],
+      "versionPackage": "rust" }
+  ]
+}
+```
+
+* `source: "termux"` — the app resolves `packages` plus all dependencies against the Termux
+  package index, downloads each `.deb` from the same mirror (SHA-256 checked), extracts it,
+  installs `lsp.npm` if given, writes `kodrix-runtime.json` into the install dir, and runs
+  `verify`. The version shown is `versionPackage`'s current version, so updates in Termux
+  appear automatically. `version`/`tag` are only for older app builds, which crash on
+  entries without them.
+* `source` omitted — a prebuilt zip. Per ABI: `"arm64-v8a": "<url>"` (read by old builds),
+  `"mirrors": {"arm64-v8a": [urls…]}` and `"sha256ByAbi": {"arm64-v8a": "<hex>"}`.
+* `"legacy": true` — kept only for older app builds; new builds hide it.
+* `_config.termuxMirrors` — package mirrors tried in order (the app also has built-ins).
+
+Everything the editor needs later comes from the install's `kodrix-runtime.json`, so a runtime
+keeps working even if the registry entry changes or disappears.
+
+### How downloaded runtimes run
+
+Android 10+ refuses to `execve()` files in app storage, which is why the old Node 26 install
+failed ("/system/bin/sh: /data/…: Permission denied") and Kodrix fell back to the built-in
+Node 25.8.2. Downloaded ELFs are now started as `/system/bin/linker64 <elf> args…` (terminal
+wrappers in `usr/bin` do this), with `libkodrix_exec.so` preloaded so anything they spawn is
+started the same way and Termux's `/data/data/com.termux/files/usr` paths resolve to the
+install dir.
+
+Known limit: Go (and possibly Zig) start child processes with raw system calls rather than the
+C library, so the preload shim can't redirect them; `go version` works, but gopls (which runs `go list`) and
+`go build` may be blocked. Both are marked experimental in the registry.

@@ -6,7 +6,9 @@
 // real binary instead of the linker.
 //
 // Environment:
-//   KODRIX_ROOT       replacement for /data/data/com.termux/files (required for remap)
+//   KODRIX_USR        replacement for /data/data/com.termux/files/usr (checked first); a
+//                     downloaded runtime's install dir, whose bin/ lib/ mirror Termux's usr/
+//   KODRIX_ROOT       replacement for /data/data/com.termux/files (fallback remap)
 //   KODRIX_APP_DATA   ':'-separated app data dirs whose ELFs need the linker (optional)
 //   KODRIX_EXE        set by this shim on rewritten execs; read by readlink(/proc/self/exe)
 //   KODRIX_EXEC_DEBUG if set, log decisions to stderr
@@ -34,6 +36,8 @@ extern char **environ;
 
 #define TERMUX_ROOT "/data/data/com.termux/files"
 #define TERMUX_ROOT_LEN (sizeof(TERMUX_ROOT) - 1)
+#define TERMUX_USR TERMUX_ROOT "/usr"
+#define TERMUX_USR_LEN (sizeof(TERMUX_USR) - 1)
 #define MAX_ARGS 4096
 #define MAX_ENVS 1024
 #define HEADER_MAX 256
@@ -62,6 +66,8 @@ typedef ssize_t (*readlink_chk_fn)(const char *, char *, size_t, size_t);
 typedef ssize_t (*readlinkat_chk_fn)(int, const char *, char *, size_t, size_t);
 typedef DIR *(*opendir_fn)(const char *);
 typedef char *(*realpath_fn)(const char *, char *);
+typedef int (*stat64_fn)(const char *, struct stat64 *);
+typedef int (*fstatat64_fn)(int, const char *, struct stat64 *, int);
 
 static execve_fn real_execve;
 static posix_spawn_fn real_posix_spawn;
@@ -81,6 +87,14 @@ static readlink_chk_fn real_readlink_chk;
 static readlinkat_chk_fn real_readlinkat_chk;
 static opendir_fn real_opendir;
 static realpath_fn real_realpath;
+// Large-file variants: programs built with _FILE_OFFSET_BITS=64 (and glibc hosts) call
+// these names instead, bypassing the plain hooks.
+static open_fn real_open64;
+static openat_fn real_openat64;
+static fopen_fn real_fopen64;
+static stat64_fn real_stat64;
+static stat64_fn real_lstat64;
+static fstatat64_fn real_fstatat64;
 static volatile int resolved;
 static void kodrix_exec_resolve(void);
 #define ENSURE() do { if (!resolved) kodrix_exec_resolve(); } while (0)
@@ -96,14 +110,29 @@ static int debug_enabled(void) { return getenv("KODRIX_EXEC_DEBUG") != NULL; }
 // Every line goes to $KODRIX_LOG (append) when set, so failures are visible from the
 // Settings > "View exec log" screen even when nobody is watching logcat/stderr live.
 // Falls back to stderr (fd 2, usually the terminal itself) when KODRIX_LOG is unset.
+#define LOG_MAX_BYTES (1024 * 1024)
+
 static void log_write(const char *a, const char *b, const char *c, const char *d) {
     const char *parts[] = {"kodrix-exec: ", a, b ? b : "", c ? c : "", d ? d : "", "\n"};
     const char *log_path = getenv("KODRIX_LOG");
-    int fd = 2;
+    int fd = -1;
     int opened = 0;
     if (log_path && log_path[0] && real_open) {
         int lf = real_open(log_path, O_WRONLY | O_CREAT | O_APPEND | O_CLOEXEC, 0600);
-        if (lf >= 0) { fd = lf; opened = 1; }
+        if (lf >= 0) {
+            fd = lf;
+            opened = 1;
+            // Every runtime process can write here, so keep the file bounded.
+            struct stat st;
+            if (fstat(lf, &st) == 0 && st.st_size > LOG_MAX_BYTES) (void)!ftruncate(lf, 0);
+        }
+    }
+    // Without a log file, only write to stderr in debug mode: this library runs inside
+    // every downloaded runtime, and stray lines would corrupt program output (e.g. LSP
+    // stdio, `node -v`).
+    if (fd < 0) {
+        if (!debug_enabled()) return;
+        fd = 2;
     }
     for (size_t i = 0; i < sizeof(parts) / sizeof(parts[0]); i++) {
         size_t n = strlen(parts[i]);
@@ -137,19 +166,29 @@ static size_t copy_str(char *dst, size_t cap, const char *src) {
     return n;
 }
 
-// Maps /data/data/com.termux/files[/...] to $KODRIX_ROOT[/...]. Returns path unchanged
-// when it isn't a Termux path or the result wouldn't fit.
+static const char *replace_prefix(const char *path, size_t plen, const char *repl, char *buf, size_t cap) {
+    size_t rl = strlen(repl), tl = strlen(path + plen);
+    if (rl + tl + 1 > cap) return path;
+    memcpy(buf, repl, rl);
+    memcpy(buf + rl, path + plen, tl + 1);
+    return buf;
+}
+
+// Maps /data/data/com.termux/files/usr[/...] to $KODRIX_USR[/...] when set, otherwise
+// /data/data/com.termux/files[/...] to $KODRIX_ROOT[/...]. Returns path unchanged when
+// it isn't a Termux path or the result wouldn't fit.
 static const char *redirect(const char *path, char *buf, size_t cap) {
     if (path == NULL || strncmp(path, TERMUX_ROOT, TERMUX_ROOT_LEN) != 0) return path;
     char next = path[TERMUX_ROOT_LEN];
     if (next != '\0' && next != '/') return path;
+    const char *usr = getenv("KODRIX_USR");
+    if (usr && usr[0] && strncmp(path, TERMUX_USR, TERMUX_USR_LEN) == 0 &&
+        (path[TERMUX_USR_LEN] == '\0' || path[TERMUX_USR_LEN] == '/')) {
+        return replace_prefix(path, TERMUX_USR_LEN, usr, buf, cap);
+    }
     const char *root = getenv("KODRIX_ROOT");
     if (root == NULL || root[0] == '\0') return path;
-    size_t rl = strlen(root), tl = strlen(path + TERMUX_ROOT_LEN);
-    if (rl + tl + 1 > cap) return path;
-    memcpy(buf, root, rl);
-    memcpy(buf + rl, path + TERMUX_ROOT_LEN, tl + 1);
-    return buf;
+    return replace_prefix(path, TERMUX_ROOT_LEN, root, buf, cap);
 }
 
 static int has_dir_prefix(const char *path, const char *dir, size_t dlen) {
@@ -247,7 +286,7 @@ static const char *remap_interp(const char *interp, char *buf, size_t cap) {
 struct plan {
     const char *path;
     char *argv[MAX_ARGS + 4];
-    char *envp[MAX_ENVS + 8];
+    char *envp[MAX_ENVS + 12];
     char redir[PATH_MAX];
     char abs[PATH_MAX];
     char hdr[HEADER_MAX];
@@ -269,7 +308,8 @@ static int env_has(char *const envp[], const char *key) {
 // Copies envp, dropping any stale KODRIX_EXE, re-injecting our control vars if a caller
 // built a fresh env without them, and setting KODRIX_EXE when exe != NULL.
 static int build_env(struct plan *pl, char *const envp[], const char *exe) {
-    static const char *const keep[] = {"LD_PRELOAD", "KODRIX_ROOT", "KODRIX_APP_DATA", "KODRIX_EXEC_DEBUG"};
+    static const char *const keep[] = {"LD_PRELOAD", "KODRIX_USR", "KODRIX_ROOT", "KODRIX_APP_DATA",
+                                       "KODRIX_LOG", "KODRIX_EXEC_DEBUG"};
     size_t n = 0;
     for (size_t i = 0; envp && envp[i]; i++) {
         if (env_key_is(envp[i], "KODRIX_EXE")) continue;
@@ -515,6 +555,59 @@ int faccessat(int dirfd, const char *path, int mode, int flags) {
     return real_faccessat(dirfd, redirect(path, buf, sizeof(buf)), mode, flags);
 }
 
+int open64(const char *path, int flags, ...) {
+    ENSURE();
+    mode_t mode = 0;
+    if (needs_mode(flags)) {
+        va_list ap;
+        va_start(ap, flags);
+        mode = (mode_t)va_arg(ap, int);
+        va_end(ap);
+    }
+    char buf[PATH_MAX];
+    open_fn f = real_open64 ? real_open64 : real_open;
+    return f(redirect(path, buf, sizeof(buf)), flags, mode);
+}
+
+int openat64(int dirfd, const char *path, int flags, ...) {
+    ENSURE();
+    mode_t mode = 0;
+    if (needs_mode(flags)) {
+        va_list ap;
+        va_start(ap, flags);
+        mode = (mode_t)va_arg(ap, int);
+        va_end(ap);
+    }
+    char buf[PATH_MAX];
+    openat_fn f = real_openat64 ? real_openat64 : real_openat;
+    return f(dirfd, redirect(path, buf, sizeof(buf)), flags, mode);
+}
+
+FILE *fopen64(const char *path, const char *mode) {
+    ENSURE();
+    char buf[PATH_MAX];
+    fopen_fn f = real_fopen64 ? real_fopen64 : real_fopen;
+    return f(redirect(path, buf, sizeof(buf)), mode);
+}
+
+int stat64(const char *path, struct stat64 *st) {
+    ENSURE();
+    char buf[PATH_MAX];
+    return real_stat64(redirect(path, buf, sizeof(buf)), st);
+}
+
+int lstat64(const char *path, struct stat64 *st) {
+    ENSURE();
+    char buf[PATH_MAX];
+    return real_lstat64(redirect(path, buf, sizeof(buf)), st);
+}
+
+int fstatat64(int dirfd, const char *path, struct stat64 *st, int flags) {
+    ENSURE();
+    char buf[PATH_MAX];
+    return real_fstatat64(dirfd, redirect(path, buf, sizeof(buf)), st, flags);
+}
+
 // Returns the length written for /proc/self/exe when KODRIX_EXE is set, else -2.
 static ssize_t fake_self_exe(const char *path, char *out, size_t size) {
     if (path == NULL || strcmp(path, "/proc/self/exe") != 0) return -2;
@@ -595,16 +688,21 @@ static void kodrix_exec_resolve(void) {
     real_readlinkat_chk = (readlinkat_chk_fn)dlsym(RTLD_NEXT, "__readlinkat_chk");
     real_opendir = (opendir_fn)dlsym(RTLD_NEXT, "opendir");
     real_realpath = (realpath_fn)dlsym(RTLD_NEXT, "realpath");
+    real_open64 = (open_fn)dlsym(RTLD_NEXT, "open64");
+    real_openat64 = (openat_fn)dlsym(RTLD_NEXT, "openat64");
+    real_fopen64 = (fopen_fn)dlsym(RTLD_NEXT, "fopen64");
+    real_stat64 = (stat64_fn)dlsym(RTLD_NEXT, "stat64");
+    real_lstat64 = (stat64_fn)dlsym(RTLD_NEXT, "lstat64");
+    real_fstatat64 = (fstatat64_fn)dlsym(RTLD_NEXT, "fstatat64");
     resolved = 1;
 }
 
 __attribute__((constructor)) static void kodrix_exec_init(void) {
     if (!resolved) kodrix_exec_resolve();
-    // Always logged (not gated by KODRIX_EXEC_DEBUG): if the log file never gets this
-    // line, LD_PRELOAD isn't taking effect at all — the first thing to check when
-    // "nothing happens" during a Phase 0 test.
+    // Debug-only: logging every process start would grow the log without bound.
+    if (!debug_enabled()) return;
     char pid[24];
     snprintf(pid, sizeof(pid), "%d", (int)getpid());
-    const char *root = getenv("KODRIX_ROOT");
-    log_write("loaded in pid ", pid, root && root[0] ? ", KODRIX_ROOT=" : ", KODRIX_ROOT unset", root && root[0] ? root : NULL);
+    const char *usr = getenv("KODRIX_USR");
+    log_write("loaded in pid ", pid, usr && usr[0] ? ", KODRIX_USR=" : ", KODRIX_USR unset", usr && usr[0] ? usr : NULL);
 }

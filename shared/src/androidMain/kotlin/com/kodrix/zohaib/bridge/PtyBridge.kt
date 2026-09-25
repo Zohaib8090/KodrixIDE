@@ -190,14 +190,29 @@ class PtyBridge {
         }
         
         // Setup binary symlinks
-        try {
-            val ln = arrayOf("/system/bin/ln", "-sf")
-            Runtime.getRuntime().exec(ln + arrayOf("$nativeLibPath/libgit_bin.so", "$usrBinDir/git")).waitFor()
-            Runtime.getRuntime().exec(ln + arrayOf("$nativeLibPath/libgit_remote_http_bin.so", "$usrBinDir/git-remote-http")).waitFor()
-            Runtime.getRuntime().exec(ln + arrayOf("$nativeLibPath/libgit_remote_http_bin.so", "$usrBinDir/git-remote-https")).waitFor()
-            Runtime.getRuntime().exec(ln + arrayOf("$nativeLibPath/libnode_bin.so", "$usrBinDir/node")).waitFor()
-        } catch (e: Exception) {
-            Log.e("PtyBridge", "Failed to create symlinks", e)
+        // Default links to the built-in git/node. Direct syscalls instead of spawning
+        // `ln -sf` four times (each spawn is slow). A regular file here is a wrapper for
+        // the version the user picked in Runtimes (see WrapperManager), so it's left alone;
+        // `ln -sf` used to overwrite it, which silently put the built-in version back.
+        listOf(
+            "libgit_bin.so" to "git",
+            "libgit_remote_http_bin.so" to "git-remote-http",
+            "libgit_remote_http_bin.so" to "git-remote-https",
+            "libnode_bin.so" to "node",
+        ).forEach { (so, name) ->
+            val link = java.io.File(usrBinDir, name)
+            val target = "$nativeLibPath/$so"
+            try {
+                val isLink = java.nio.file.Files.isSymbolicLink(link.toPath())
+                if (link.exists() && !isLink) return@forEach
+                val current = if (isLink) try { android.system.Os.readlink(link.path) } catch (_: Exception) { null } else null
+                if (current != target) {
+                    link.delete()
+                    android.system.Os.symlink(target, link.path)
+                }
+            } catch (e: Exception) {
+                Log.e("PtyBridge", "Failed to link $name", e)
+            }
         }
 
         // 1. DNS Configs

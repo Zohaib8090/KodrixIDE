@@ -44,14 +44,13 @@ class MainActivity : ComponentActivity() {
                     }
                 }
                 
-                // Automatically ask for permissions on startup
+                // Only notifications are asked for at startup (install progress uses them).
+                // Camera and microphone are asked for from the browser, when a project needs them.
                 androidx.compose.runtime.LaunchedEffect(Unit) {
                     val permissions = mutableListOf<String>()
                     if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
                         permissions.add(android.Manifest.permission.POST_NOTIFICATIONS)
                     }
-                    permissions.add(android.Manifest.permission.CAMERA)
-                    permissions.add(android.Manifest.permission.RECORD_AUDIO)
 
                     val toRequest = permissions.filter {
                         androidx.core.content.ContextCompat.checkSelfPermission(this@MainActivity, it) != android.content.pm.PackageManager.PERMISSION_GRANTED

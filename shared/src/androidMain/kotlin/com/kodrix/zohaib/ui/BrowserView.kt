@@ -40,6 +40,31 @@ fun BrowserView(viewModel: TerminalViewModel) {
         filePathCallback = null
     }
 
+    // ── Camera / microphone ────────────────────────────────────────────────────
+    // Not asked for at app start. The first time the browser opens, a card offers each
+    // one separately (or Skip); it comes back if a page asks for one that isn't allowed.
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val settings = remember { context.getSharedPreferences("kodrix_settings", android.content.Context.MODE_PRIVATE) }
+    fun has(permission: String) = androidx.core.content.ContextCompat.checkSelfPermission(context, permission) ==
+        android.content.pm.PackageManager.PERMISSION_GRANTED
+    var micGranted by remember { mutableStateOf(has(android.Manifest.permission.RECORD_AUDIO)) }
+    var cameraGranted by remember { mutableStateOf(has(android.Manifest.permission.CAMERA)) }
+    var showMediaCard by remember {
+        mutableStateOf(!settings.getBoolean(MEDIA_PROMPT_DONE, false) && !(micGranted && cameraGranted))
+    }
+    fun closeMediaCard() {
+        settings.edit().putBoolean(MEDIA_PROMPT_DONE, true).apply()
+        showMediaCard = false
+    }
+    val micLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { ok ->
+        micGranted = ok
+        if (micGranted && cameraGranted) closeMediaCard()
+    }
+    val cameraLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { ok ->
+        cameraGranted = ok
+        if (micGranted && cameraGranted) closeMediaCard()
+    }
+
     // Sync state when changed from outside
     LaunchedEffect(browserUrlState) {
         if (browserUrlState != url) {
@@ -130,6 +155,15 @@ fun BrowserView(viewModel: TerminalViewModel) {
 
             Spacer(Modifier.width(4.dp))
 
+            // Camera / microphone access (reopens the card)
+            IconButton(onClick = { showMediaCard = true }, modifier = Modifier.size((24 * uiScale).dp)) {
+                Icon(
+                    Icons.Default.PermCameraMic, "Camera and microphone",
+                    tint = if (micGranted || cameraGranted) Color(0xFF3FB950) else Color.Gray,
+                    modifier = Modifier.size((16 * uiScale).dp)
+                )
+            }
+
             // Close Browser Button
             IconButton(
                 onClick = { viewModel.closeBrowser() },
@@ -140,6 +174,17 @@ fun BrowserView(viewModel: TerminalViewModel) {
         }
         
         HorizontalDivider(color = Color(0xFF30363D))
+
+        if (showMediaCard) {
+            MediaPermissionCard(
+                uiScale = uiScale,
+                micGranted = micGranted,
+                cameraGranted = cameraGranted,
+                onAllowMic = { micLauncher.launch(android.Manifest.permission.RECORD_AUDIO) },
+                onAllowCamera = { cameraLauncher.launch(android.Manifest.permission.CAMERA) },
+                onSkip = { closeMediaCard() },
+            )
+        }
 
         AndroidView(
             factory = { context ->
@@ -226,7 +271,23 @@ fun BrowserView(viewModel: TerminalViewModel) {
 
                     webChromeClient = object : WebChromeClient() {
                         override fun onPermissionRequest(request: PermissionRequest?) {
-                            request?.grant(request.resources)
+                            request ?: return
+                            // Pass on only what Android has allowed Kodrix; for the rest,
+                            // show the card so the user can allow it and reload.
+                            val allowed = request.resources.filter { res ->
+                                when (res) {
+                                    PermissionRequest.RESOURCE_AUDIO_CAPTURE -> has(android.Manifest.permission.RECORD_AUDIO)
+                                    PermissionRequest.RESOURCE_VIDEO_CAPTURE -> has(android.Manifest.permission.CAMERA)
+                                    else -> true
+                                }
+                            }
+                            if (allowed.size < request.resources.size) {
+                                micGranted = has(android.Manifest.permission.RECORD_AUDIO)
+                                cameraGranted = has(android.Manifest.permission.CAMERA)
+                                showMediaCard = true
+                                viewModel.appendLogcat("BROWSER: page asked for camera/microphone — allow it from the card above, then reload")
+                            }
+                            if (allowed.isEmpty()) request.deny() else request.grant(allowed.toTypedArray())
                         }
 
                         override fun onShowFileChooser(
@@ -282,5 +343,73 @@ fun BrowserView(viewModel: TerminalViewModel) {
                 webView = null
             }
         }
+    }
+}
+
+private const val MEDIA_PROMPT_DONE = "browser_media_prompt_done"
+
+@Composable
+private fun MediaPermissionCard(
+    uiScale: Float,
+    micGranted: Boolean,
+    cameraGranted: Boolean,
+    onAllowMic: () -> Unit,
+    onAllowCamera: () -> Unit,
+    onSkip: () -> Unit,
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(Color(0xFF161B22))
+            .padding(horizontal = (12 * uiScale).dp, vertical = (10 * uiScale).dp)
+    ) {
+        Text(
+            "Does your project use the microphone or camera?",
+            color = Color.White, fontSize = (13 * uiScale).sp, fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold
+        )
+        Text(
+            "Web apps you test here can only use them if Kodrix is allowed to. Allow just the one you need, or skip — you can come back with the camera/mic button in the toolbar.",
+            color = Color(0xFF8B949E), fontSize = (11 * uiScale).sp, lineHeight = (15 * uiScale).sp
+        )
+        Spacer(Modifier.height((8 * uiScale).dp))
+        Row(horizontalArrangement = Arrangement.spacedBy((8 * uiScale).dp), verticalAlignment = Alignment.CenterVertically) {
+            MediaButton("Microphone", Icons.Default.Mic, micGranted, uiScale, onAllowMic)
+            MediaButton("Camera", Icons.Default.Videocam, cameraGranted, uiScale, onAllowCamera)
+            Spacer(Modifier.weight(1f))
+            TextButton(onClick = onSkip) {
+                Text(if (micGranted || cameraGranted) "Done" else "Skip", color = Color(0xFF8B949E), fontSize = (11 * uiScale).sp)
+            }
+        }
+    }
+    HorizontalDivider(color = Color(0xFF30363D))
+}
+
+@Composable
+private fun MediaButton(
+    label: String,
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    granted: Boolean,
+    uiScale: Float,
+    onClick: () -> Unit,
+) {
+    OutlinedButton(
+        onClick = onClick,
+        enabled = !granted,
+        shape = androidx.compose.foundation.shape.RoundedCornerShape((6 * uiScale).dp),
+        border = androidx.compose.foundation.BorderStroke(1.dp, if (granted) Color(0xFF238636) else Color(0xFF30363D)),
+        contentPadding = PaddingValues(horizontal = (10 * uiScale).dp, vertical = 0.dp),
+        modifier = Modifier.height((30 * uiScale).dp)
+    ) {
+        Icon(
+            if (granted) Icons.Default.Check else icon, null,
+            tint = if (granted) Color(0xFF3FB950) else Color(0xFF58A6FF),
+            modifier = Modifier.size((14 * uiScale).dp)
+        )
+        Spacer(Modifier.width((5 * uiScale).dp))
+        Text(
+            if (granted) "$label allowed" else "Allow $label".lowercase().replaceFirstChar { it.uppercase() },
+            color = if (granted) Color(0xFF3FB950) else Color.White,
+            fontSize = (11 * uiScale).sp
+        )
     }
 }

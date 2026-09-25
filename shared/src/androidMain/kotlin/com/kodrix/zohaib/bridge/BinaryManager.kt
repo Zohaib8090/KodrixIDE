@@ -112,11 +112,15 @@ class BinaryManager(private val context: Context) {
         _notificationsList.value = emptyList()
     }
 
-    private val masterKey = MasterKey.Builder(context)
-        .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
-        .build()
+    // Opening the keystore-backed prefs takes a noticeable moment, so it's deferred until
+    // first use (normally prepare(), off the main thread) instead of app start.
+    private val masterKey by lazy {
+        MasterKey.Builder(context)
+            .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
+            .build()
+    }
 
-    private val prefs = try {
+    private val prefs by lazy { try {
         EncryptedSharedPreferences.create(
             context,
             "binary_manager_secure",
@@ -135,7 +139,7 @@ class BinaryManager(private val context: Context) {
             EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
             EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
         )
-    }
+    } }
 
     private val filesDir = context.filesDir
     private val versionsDir = File(filesDir, "versions")
@@ -204,7 +208,7 @@ class BinaryManager(private val context: Context) {
      * off the terminal PATH and their language server is not started, so nothing of
      * theirs is loaded until they are resumed. Built-in tools can't be paused.
      */
-    private val _pausedTools = MutableStateFlow(prefs.getStringSet(PAUSED_KEY, null)?.toSet() ?: emptySet())
+    private val _pausedTools = MutableStateFlow<Set<String>>(emptySet())
     val pausedTools = _pausedTools.asStateFlow()
 
     fun isPaused(tool: String) = tool in _pausedTools.value
@@ -239,6 +243,19 @@ class BinaryManager(private val context: Context) {
     init {
         versionsDir.mkdirs()
         registryDir.mkdirs()
+    }
+
+    @Volatile private var prepared = false
+
+    /**
+     * Startup work that touches the disk: clears interrupted installs, writes the command
+     * wrappers and loads the cached registry. Call from a background thread before the
+     * first terminal starts; later calls return immediately.
+     */
+    @Synchronized
+    fun prepare() {
+        if (prepared) return
+        _pausedTools.value = prefs.getStringSet(PAUSED_KEY, null)?.toSet() ?: emptySet()
         cleanUpStaleDownloads()
         // Populate the safe-mode fallback directory (bundled-only wrappers, never modified again)
         WrapperManager.writeSafeModeWrappers(context)
@@ -246,6 +263,7 @@ class BinaryManager(private val context: Context) {
         rebuildWrappers()
         // Language lookups work offline from the last registry we saw.
         readCachedRegistry()?.let { applyRegistryConfig(it) }
+        prepared = true
     }
 
     // ── Startup helpers ───────────────────────────────────────────────────────

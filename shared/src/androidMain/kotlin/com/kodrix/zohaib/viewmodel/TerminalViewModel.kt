@@ -21,6 +21,7 @@ import com.kodrix.zohaib.lsp.LspClient
 import com.kodrix.zohaib.lsp.PublishDiagnosticsParams
 import com.kodrix.zohaib.lsp.Diagnostic
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import androidx.compose.runtime.mutableStateListOf
 import android.content.Intent
@@ -85,6 +86,9 @@ class TerminalViewModel(application: Application) : AndroidViewModel(application
 
     private val aiManager = com.kodrix.zohaib.ai.AIBackendManager(application)
     val binaryManager = com.kodrix.zohaib.bridge.BinaryManager(application)
+    // Declared early: the init blocks below start the terminal, which takes this lock
+    // on a background thread while the rest of the constructor may still be running.
+    private val terminalEnvLock = kotlinx.coroutines.sync.Mutex()
 
     private val agentServerLauncher: com.kodrix.zohaib.agent.AgentServerLauncher by lazy {
         com.kodrix.zohaib.agent.AgentServerLauncher(application)
@@ -1867,7 +1871,7 @@ class TerminalViewModel(application: Application) : AndroidViewModel(application
     }
 
     init {
-        ensureDnsFix()
+        viewModelScope.launch(Dispatchers.IO) { ensureDnsFix() }
         refreshProjects()
         startLogcatStream()
         checkUpdate()
@@ -3640,18 +3644,43 @@ class TerminalViewModel(application: Application) : AndroidViewModel(application
     }
 
     init {
+        // Show the editor straight away. Everything that touches the disk or starts
+        // processes (terminal environment, command wrappers, file tree) runs in the
+        // background; the terminal panel fills in when its shell is ready.
+        _isReady.value = true
         refreshProjects()
         val current = _activeProject.value
         if (current != null) {
-            refreshFileTree(java.io.File(projectsRoot, current))
+            viewModelScope.launch(Dispatchers.IO) { refreshFileTree(java.io.File(projectsRoot, current)) }
             refreshGitStatus()
         }
         addNewTerminal()
-        _isReady.value = true
+    }
+
+    /** Prepares files/bin, usr/bin and the runtime wrappers the shell relies on. */
+    private suspend fun prepareTerminalEnvironment() = withContext(Dispatchers.IO) {
+        terminalEnvLock.withLock {
+            val context = getApplication<android.app.Application>().applicationContext
+            binaryManager.prepare()
+            com.kodrix.zohaib.bridge.PtyBridge().setupEnvironment(context)
+        }
+    }
+
+    fun addNewTerminal() {
+        viewModelScope.launch {
+            _setupStatus.value = "Preparing terminal…"
+            try {
+                prepareTerminalEnvironment()
+            } catch (e: Exception) {
+                Log.e("Kodrix", "Terminal environment setup failed", e)
+            }
+            // TerminalSession needs the main thread (it creates a Handler).
+            startTerminalSession()
+        }
     }
 
     // ── FIXED: Multi-terminal fix using instanceHolder pattern ────────────────
-    fun addNewTerminal() {
+    private fun startTerminalSession() {
         val nextId = (_instances.value.maxByOrNull { it.id }?.id ?: 0) + 1
         val projDir = _activeProject.value?.let { java.io.File(projectsRoot, it) }
         val cwd = projDir?.absolutePath ?: "/"
@@ -3691,7 +3720,6 @@ class TerminalViewModel(application: Application) : AndroidViewModel(application
         }
 
         val context = getApplication<android.app.Application>().applicationContext
-        com.kodrix.zohaib.bridge.PtyBridge().setupEnvironment(context)
 
         val binDir = context.filesDir.absolutePath
         val nativeLibPath = context.applicationInfo.nativeLibraryDir

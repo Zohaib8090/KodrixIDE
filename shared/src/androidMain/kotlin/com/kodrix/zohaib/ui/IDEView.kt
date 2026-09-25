@@ -10,6 +10,7 @@ import androidx.compose.foundation.gestures.rememberDraggableState
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.selection.SelectionContainer
@@ -51,6 +52,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import kotlinx.coroutines.launch
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun IDEView(viewModel: TerminalViewModel) {
     val isPanelVisible by viewModel.isPanelVisible.collectAsState()
@@ -60,8 +62,18 @@ fun IDEView(viewModel: TerminalViewModel) {
     val sidebarMode by viewModel.sidebarMode.collectAsState()
     val activeProject by viewModel.activeProject.collectAsState()
     var fullScreenImage by remember { mutableStateOf<String?>(null) }
+    // True while a text field in the side panel (Runtimes search, file search, …) has
+    // focus. The keyboard then just covers the screen: resizing for it would push the
+    // terminal panel up. Typing in the terminal or editor still lifts them above it.
+    var sidebarFocused by remember { mutableStateOf(false) }
 
-    Box(modifier = Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding().imePadding()) {
+    Box(
+        modifier = Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding()
+            .then(
+                if (sidebarFocused) Modifier.consumeWindowInsets(WindowInsets.ime)
+                else Modifier.imePadding()
+            )
+    ) {
         val sidebarWidthPx = with(LocalDensity.current) { (280 * uiScale).dp.toPx() }
         val animationProgress by animateFloatAsState(
             targetValue = if (sidebarOpen) 1f else 0f,
@@ -82,6 +94,7 @@ fun IDEView(viewModel: TerminalViewModel) {
                             translationX = (animationProgress - 1f) * sidebarWidthPx
                             clip = true
                         }
+                        .onFocusChanged { sidebarFocused = it.hasFocus }
                 ) {
                     ProjectSidebar(viewModel)
                 }

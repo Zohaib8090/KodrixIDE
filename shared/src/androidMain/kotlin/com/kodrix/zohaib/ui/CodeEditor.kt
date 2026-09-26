@@ -152,7 +152,11 @@ fun CodeEditor(viewModel: TerminalViewModel, viewportId: Int = 0) {
 
         HorizontalDivider(color = Color(0xFF30363D))
 
+        val useExperimentalEditor by viewModel.useExperimentalEditor.collectAsState()
         Box(modifier = Modifier.fillMaxWidth().weight(1f)) {
+            if (useExperimentalEditor) {
+                SoraCodeEditor(viewModel, viewportId, activeTab, diagnostics, Modifier.fillMaxSize())
+            } else {
             val verticalScrollState = rememberScrollState()
             val horizontalScrollState = rememberScrollState()
             val lineCount = activeTab.text.text.count { it == '\n' } + 1
@@ -196,6 +200,7 @@ fun CodeEditor(viewModel: TerminalViewModel, viewportId: Int = 0) {
                         keyboardOptions = KeyboardOptions(autoCorrect = false, imeAction = ImeAction.None)
                     )
                 }
+            }
             }
 
             // Floating autocomplete dropdown — anchored outside scroll so it always shows

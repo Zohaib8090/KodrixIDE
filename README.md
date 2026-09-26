@@ -239,6 +239,8 @@ Open an issue on GitHub with steps to reproduce.
 - [bore](https://github.com/ekzhang/bore) — Port forwarding
 - [Open VSX](https://open-vsx.org/) — Extension marketplace
 - [XZ for Java](https://tukaani.org/xz/java.html) — Pure-Java XZ decompression for Clang toolchain install
+- [Sora Editor](https://github.com/Rosemoe/sora-editor) — Code editor component for the experimental editor (LGPL-2.1)
+- [VS Code](https://github.com/microsoft/vscode) — TextMate grammars, language configurations and the Dark Modern theme (MIT)
 
 ---
 

@@ -46,6 +46,10 @@ kotlin {
                 implementation("com.google.android.material:material:1.11.0")
                 implementation("io.coil-kt:coil-compose:2.6.0")
                 implementation("org.tukaani:xz:1.10")
+                // Experimental editor (Settings → Developer). 0.24.5+ needs compileSdk 36 and
+                // Kotlin 2.3; 0.24.4 works with this project's compileSdk 34 / Kotlin 2.1.
+                implementation("io.github.rosemoe:editor:0.24.4")
+                implementation("io.github.rosemoe:language-textmate:0.24.4")
                 implementation("androidx.activity:activity-compose:1.8.2")
                 implementation(platform("com.google.firebase:firebase-bom:34.13.0"))
                 implementation("com.google.firebase:firebase-analytics")

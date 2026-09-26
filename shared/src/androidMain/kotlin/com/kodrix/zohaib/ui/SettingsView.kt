@@ -309,6 +309,46 @@ fun SettingsContent(viewModel: TerminalViewModel) {
                     )
                 }
 
+                // Experimental editor toggle (documents/VSCODE_EXTENSIONS.md §3)
+                val useExperimentalEditor by viewModel.useExperimentalEditor.collectAsState()
+                HorizontalDivider(color = Color(0xFF30363D), thickness = 1.dp)
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = (12 * uiScale).dp, vertical = (10 * uiScale).dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            "Experimental editor",
+                            color = if (useExperimentalEditor) Color(0xFFF78166) else Color.White,
+                            fontSize = (13 * uiScale).sp,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                        Spacer(Modifier.height((2 * uiScale).dp))
+                        Text(
+                            text = if (useExperimentalEditor)
+                                "Files open in the new editor with VS Code highlighting. It's still being tested. Turn this off to go back to the standard editor."
+                            else
+                                "Try the new editor: VS Code syntax highlighting and themes, and smoother with big files. Still being tested.",
+                            color = Color(0xFF8B949E),
+                            fontSize = (10 * uiScale).sp,
+                            lineHeight = (14 * uiScale).sp
+                        )
+                    }
+                    Spacer(Modifier.width((8 * uiScale).dp))
+                    Switch(
+                        checked = useExperimentalEditor,
+                        onCheckedChange = { viewModel.setExperimentalEditor(it) },
+                        colors = SwitchDefaults.colors(
+                            checkedThumbColor   = Color(0xFFF78166),
+                            checkedTrackColor   = Color(0xFFF78166).copy(alpha = 0.35f),
+                            uncheckedThumbColor = Color(0xFF484F58),
+                            uncheckedTrackColor = Color(0xFF21262D)
+                        )
+                    )
+                }
+
                 if (isBetaMode) {
                     HorizontalDivider(color = Color(0xFF30363D), thickness = 1.dp)
 

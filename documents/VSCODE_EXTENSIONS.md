@@ -74,7 +74,7 @@ Android View) is a mature open-source Android code editor with built-in:
 
 **Opt-in only (owner decision).** The current editor stays the default for everyone. Sora
 Editor is used only when the user turns on **Settings → Developer → Experimental editor**
-(off by default, takes effect when files are reopened). Themes, grammars and snippets from
+(off by default, applies immediately). Themes, grammars and snippets from
 extensions (Phase B/C) only apply in the experimental editor; the Marketplace says so, with a
 link to the switch. The experimental editor becomes the default only when the owner decides
 it's ready, as a separate change.

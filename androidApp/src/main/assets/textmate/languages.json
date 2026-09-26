@@ -1,0 +1,113 @@
+{
+  "languages": [
+    {
+      "name": "javascript",
+      "scopeName": "source.js",
+      "grammar": "textmate/grammars/javascript.json",
+      "languageConfiguration": "textmate/configs/javascript.json"
+    },
+    {
+      "name": "typescript",
+      "scopeName": "source.ts",
+      "grammar": "textmate/grammars/typescript.json",
+      "languageConfiguration": "textmate/configs/typescript-basics.json"
+    },
+    {
+      "name": "typescriptreact",
+      "scopeName": "source.tsx",
+      "grammar": "textmate/grammars/typescriptreact.json",
+      "languageConfiguration": "textmate/configs/typescript-basics.json"
+    },
+    {
+      "name": "html",
+      "scopeName": "text.html.basic",
+      "grammar": "textmate/grammars/html.json",
+      "languageConfiguration": "textmate/configs/html.json"
+    },
+    {
+      "name": "css",
+      "scopeName": "source.css",
+      "grammar": "textmate/grammars/css.json",
+      "languageConfiguration": "textmate/configs/css.json"
+    },
+    {
+      "name": "json",
+      "scopeName": "source.json",
+      "grammar": "textmate/grammars/json.json",
+      "languageConfiguration": "textmate/configs/json.json"
+    },
+    {
+      "name": "markdown",
+      "scopeName": "text.html.markdown",
+      "grammar": "textmate/grammars/markdown.json",
+      "languageConfiguration": "textmate/configs/markdown-basics.json"
+    },
+    {
+      "name": "python",
+      "scopeName": "source.python",
+      "grammar": "textmate/grammars/python.json",
+      "languageConfiguration": "textmate/configs/python.json"
+    },
+    {
+      "name": "c",
+      "scopeName": "source.c",
+      "grammar": "textmate/grammars/c.json",
+      "languageConfiguration": "textmate/configs/cpp.json"
+    },
+    {
+      "name": "cpp",
+      "scopeName": "source.cpp",
+      "grammar": "textmate/grammars/cpp.json",
+      "languageConfiguration": "textmate/configs/cpp.json"
+    },
+    {
+      "name": "rust",
+      "scopeName": "source.rust",
+      "grammar": "textmate/grammars/rust.json",
+      "languageConfiguration": "textmate/configs/rust.json"
+    },
+    {
+      "name": "shellscript",
+      "scopeName": "source.shell",
+      "grammar": "textmate/grammars/shellscript.json",
+      "languageConfiguration": "textmate/configs/shellscript.json"
+    },
+    {
+      "name": "java",
+      "scopeName": "source.java",
+      "grammar": "textmate/grammars/java.json",
+      "languageConfiguration": "textmate/configs/java.json"
+    },
+    {
+      "name": "yaml",
+      "scopeName": "source.yaml",
+      "grammar": "textmate/grammars/yaml.json",
+      "languageConfiguration": "textmate/configs/yaml.json"
+    },
+    {
+      "name": "yaml-1.0",
+      "scopeName": "source.yaml.1.0",
+      "grammar": "textmate/grammars/yaml-1.0.json"
+    },
+    {
+      "name": "yaml-1.1",
+      "scopeName": "source.yaml.1.1",
+      "grammar": "textmate/grammars/yaml-1.1.json"
+    },
+    {
+      "name": "yaml-1.2",
+      "scopeName": "source.yaml.1.2",
+      "grammar": "textmate/grammars/yaml-1.2.json"
+    },
+    {
+      "name": "yaml-1.3",
+      "scopeName": "source.yaml.1.3",
+      "grammar": "textmate/grammars/yaml-1.3.json"
+    },
+    {
+      "name": "yaml-embedded",
+      "scopeName": "source.yaml.embedded",
+      "grammar": "textmate/grammars/yaml-embedded.json"
+    }
+  ]
+}

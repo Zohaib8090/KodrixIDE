@@ -545,6 +545,16 @@ class TerminalViewModel(application: Application) : AndroidViewModel(application
         android.util.Log.i("BetaMode", "Beta Mode ${if (enabled) "ENABLED" else "DISABLED"}")
     }
 
+    // Settings → Developer → Experimental editor: files open in the Sora-based editor with
+    // VS Code (TextMate) highlighting. Off by default; see documents/VSCODE_EXTENSIONS.md §3.
+    private val _useExperimentalEditor = MutableStateFlow(prefs.getBoolean("experimental_editor", false))
+    val useExperimentalEditor = _useExperimentalEditor.asStateFlow()
+
+    fun setExperimentalEditor(enabled: Boolean) {
+        _useExperimentalEditor.value = enabled
+        prefs.edit().putBoolean("experimental_editor", enabled).apply()
+    }
+
     private fun getLanguageId(extension: String) = when (extension.lowercase()) {
         "html", "htm" -> "html"
         "css" -> "css"
@@ -3282,7 +3292,11 @@ class TerminalViewModel(application: Application) : AndroidViewModel(application
         }
     }
 
-    fun updateEditorText(viewportId: Int, value: TextFieldValue) {
+    /**
+     * [smartIndent] adds indentation after Enter. The experimental editor indents by itself
+     * (from the language configuration), so it passes false.
+     */
+    fun updateEditorText(viewportId: Int, value: TextFieldValue, smartIndent: Boolean = true) {
         val tabIndex = _activeTabIndices.value[viewportId] ?: return
         val currentTabs = _openTabs.value.toMutableList()
         if (tabIndex !in currentTabs.indices) return
@@ -3291,7 +3305,7 @@ class TerminalViewModel(application: Application) : AndroidViewModel(application
         var finalValue = value
 
         // Smart Indentation Logic
-        if (value.text.length == oldText.length + 1) {
+        if (smartIndent && value.text.length == oldText.length + 1) {
             val cursorIdx = value.selection.end
             if (cursorIdx > 0 && value.text[cursorIdx - 1] == '\n') {
                 // User pressed Enter
@@ -3340,6 +3354,17 @@ class TerminalViewModel(application: Application) : AndroidViewModel(application
                 requestCompletion(file, finalValue.text, finalValue.selection.start)
             }
         }
+    }
+
+    /** Cursor moved without editing (experimental editor); completions insert at this offset. */
+    fun updateEditorSelection(viewportId: Int, offset: Int) {
+        val tabIndex = _activeTabIndices.value[viewportId] ?: return
+        val currentTabs = _openTabs.value.toMutableList()
+        val tab = currentTabs.getOrNull(tabIndex) ?: return
+        if (tab.text.selection == TextRange(offset)) return
+        currentTabs[tabIndex] = tab.copy(text = tab.text.copy(selection = TextRange(offset.coerceIn(0, tab.text.text.length))))
+        _openTabs.value = currentTabs
+        _completionItems.value = emptyList()
     }
 
     fun applyCompletion(viewportId: Int, item: com.kodrix.zohaib.lsp.CompletionItem) {

@@ -219,8 +219,12 @@ object WrapperManager {
     }
 
     /**
-     * Writes a shell stub that attempts to exec the bundled native `.so` for the tool,
-     * or prints a helpful error if not available.
+     * Points [dest] at the bundled native `.so` for the tool, or writes a stub that prints
+     * a helpful error if it isn't available.
+     *
+     * The bundled binary gets a real symlink, not a wrapper script: Android 10+ refuses to
+     * execve() any file in app storage, scripts included, but a symlink into the APK's
+     * native library dir is allowed. LD_LIBRARY_PATH comes from init.sh.
      */
     private fun writeNotInstalledScript(
         dest: File,
@@ -230,25 +234,27 @@ object WrapperManager {
         libLinksDir: String
     ) {
         val fallback = File(nativeLibPath, fallbackSoName)
-        val content = if (fallback.exists()) {
-            """
-            #!/system/bin/sh
-            export LD_LIBRARY_PATH="$libLinksDir"
-            exec "$nativeLibPath/$fallbackSoName" "${'$'}@"
-            """.trimIndent()
-        } else {
-            """
-            #!/system/bin/sh
-            echo "$toolName is not installed. Please install it from the Kodrix Marketplace."
-            exit 1
-            """.trimIndent()
-        }
         try {
-            dest.writeText(content)
-            dest.setExecutable(true)
+            if (fallback.exists()) {
+                writeNativeSymlink(dest, fallback)
+            } else {
+                dest.writeText(
+                    """
+                    #!/system/bin/sh
+                    echo "$toolName is not installed. Please install it from the Kodrix Marketplace."
+                    exit 1
+                    """.trimIndent()
+                )
+                dest.setExecutable(true)
+            }
         } catch (e: Exception) {
-            Log.e(TAG, "  Failed fallback script for ${dest.name}: ${e.message}")
+            Log.e(TAG, "  Failed fallback for ${dest.name}: ${e.message}")
         }
+    }
+
+    private fun writeNativeSymlink(dest: File, target: File) {
+        if (dest.exists() || isSymlink(dest)) dest.delete()
+        Os.symlink(target.absolutePath, dest.absolutePath)
     }
 
     /** [File.isSymbolicLink] isn't available until API 26; this covers all versions. */
@@ -279,15 +285,22 @@ object WrapperManager {
         safeBinDir.mkdirs()
         Log.i(TAG, "Populating/updating usr/bin_safe/ with bundled wrappers…")
 
-        // node — bundled libnode_bin.so
-        writeSafeScript(
-            dest    = File(safeBinDir, "node"),
-            content = """
-                #!/system/bin/sh
-                export LD_LIBRARY_PATH="$libLinksDir"
-                exec "$nativeLibPath/libnode_bin.so" "${'$'}@"
-            """.trimIndent()
-        )
+        // node, git, git-remote-http(s) — symlinks straight to the bundled .so files, because
+        // Android won't exec a wrapper script from app storage (see writeNotInstalledScript).
+        listOf(
+            "node" to "libnode_bin.so",
+            "git" to "libgit_bin.so",
+            "git-remote-http" to "libgit_remote_http_bin.so",
+            "git-remote-https" to "libgit_remote_http_bin.so",
+        ).forEach { (name, so) ->
+            try {
+                writeNativeSymlink(File(safeBinDir, name), File(nativeLibPath, so))
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to write safe-mode link $name: ${e.message}")
+            }
+        }
+
+        // npm/npx are node scripts, so they stay shell wrappers; init.sh runs them via sh.
 
         // npm — bundled npm_pkg
         writeSafeScript(
@@ -308,25 +321,6 @@ object WrapperManager {
                 exec "$nativeLibPath/libnode_bin.so" "$filesDir/npm_pkg/bin/npx-cli.js" "${'$'}@"
             """.trimIndent()
         )
-
-        // git — bundled libgit_bin.so
-        writeSafeScript(
-            dest    = File(safeBinDir, "git"),
-            content = """
-                #!/system/bin/sh
-                export LD_LIBRARY_PATH="$libLinksDir"
-                exec "$nativeLibPath/libgit_bin.so" "${'$'}@"
-            """.trimIndent()
-        )
-
-        // git-remote-http / https — bundled
-        val gitRemoteContent = """
-            #!/system/bin/sh
-            export LD_LIBRARY_PATH="$libLinksDir"
-            exec "$nativeLibPath/libgit_remote_http_bin.so" "${'$'}@"
-        """.trimIndent()
-        writeSafeScript(File(safeBinDir, "git-remote-http"),  gitRemoteContent)
-        writeSafeScript(File(safeBinDir, "git-remote-https"), gitRemoteContent)
 
         Log.i(TAG, "usr/bin_safe/ populated with ${safeBinDir.list()?.size ?: 0} wrappers")
     }

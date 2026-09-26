@@ -1,7 +1,8 @@
 # Kodrix — Handoff (cloud → local)
 
-Last updated: 2026-09-25. Written at the end of a long cloud session so work can continue
-locally. Read this first; details live in the linked docs.
+Last updated: 2026-09-25 (local Windows session: first local APK build, push-session skill).
+Originally written at the end of a long cloud session so work can continue locally. Read this
+first; details live in the linked docs.
 
 ---
 
@@ -43,7 +44,7 @@ install its language server (today it's always installed).
 
 | Repo | Branch with the new work | Merged to `main`? |
 |---|---|---|
-| `Zohaib8090/KodrixIDE` | `claude/confident-rubin-3wc23a` | **No** — 14 commits ahead of `main` |
+| `Zohaib8090/KodrixIDE` | `claude/confident-rubin-3wc23a` | **Yes** (as of 2026-09-25, `main` = branch = `808e3f6`; work continues on the branch) |
 | `Zohaib8090/KodrixMarketplace` | `claude/confident-rubin-3wc23a` | **No** — registry v2, Node from Termux, weekly check |
 
 Earlier work from this session (docs move, AI agent migration, first CI) was merged as PR #8.
@@ -76,6 +77,31 @@ git pull
   shim `androidApp/src/main/cpp/kodrix_exec.c` is built by CMake).
 - There are no unit tests for the runtime code in the repo; pure-JVM pieces
   (`TermuxRepo`, `BuiltinCatalog`) were tested ad hoc against the live Termux index.
+
+### 2.1 Local build on the owner's Windows PC (works, verified 2026-09-25)
+`./gradlew :androidApp:assembleDebug` succeeded in ~3 min. Output lands in
+`androidApp/build/outputs/apk/debug/` (`androidApp-arm64-v8a-debug.apk` ≈ 229 MB is the one
+for the phone; the universal APK is ≈ 515 MB). Gotchas hit and fixed:
+- **NDK version**: the build pins `ndkVersion = "30.0.14904198"` (an r30 beta). Android
+  Studio only offered 30.0.16138531. Install the pinned one with the new Android CLI
+  (`sdkmanager.bat` mis-parses the `;` in `ndk;…`):
+  `"%LOCALAPPDATA%\Android\Sdk\cmdline-tools\latest\bin\android.exe" sdk install --canary ndk/30.0.14904198`
+- **local.properties** (gitignored, create it yourself): use forward slashes, because single
+  backslashes are escape characters there:
+  `sdk.dir=C\:/Users/Zohaib Baig/AppData/Local/Android/Sdk`
+- **"Unable to establish loopback connection"** (Gradle can't talk to its daemon): a Java 17
+  on Windows problem with Unix-domain sockets under a long `%TEMP%` path. Fix: run from Git
+  Bash with a short temp dir:
+  ```bash
+  mkdir -p /c/gtmp
+  export JAVA_HOME="/c/Program Files/Java/jdk-17" TEMP='C:\gtmp' TMP='C:\gtmp' \
+    JAVA_TOOL_OPTIONS='-Djdk.net.unixdomain.tmpdir=C:/gtmp -Djava.io.tmpdir=C:/gtmp'
+  ./gradlew :androidApp:assembleDebug
+  ```
+  When Claude runs this, the Bash sandbox must be disabled, because Gradle needs loopback sockets.
+- **Termux + proot on the phone**: building the APK there hasn't been tried. The Android
+  SDK/NDK don't officially support that host, so use CI (push to the branch and download the
+  `arm64-v8a` artifact) or build on the PC.
 
 ---
 
@@ -138,6 +164,16 @@ AutoAgent/AgentPanel system; shell-injection fix; CI APK workflow; Native Exec B
 ---
 
 ## 4. Status / what's unverified
+
+**2026-09-25:** the latest `main` (`808e3f6`) builds locally. The owner has **not yet
+installed or tested it on the phone**, so everything in the list below is still open. That
+test pass is the next step.
+
+Repo hygiene flagged (not acted on, owner to decide): `kodrix.jks` (a signing keystore) and
+two `google-services.json` files are committed to the public repo. If `kodrix.jks` signs
+release APKs, rotate it and purge it from history. `scratch/` (>1,000 extracted Termux files)
+is committed despite being in `.gitignore`. `TerminalViewModel.kt` is ~3.9k lines doing
+almost everything, and there are no tests.
 
 Confirmed by owner on device (older build): Rust installed from Runtimes; `rustup`/`rust`
 "not found" (expected — now explained); `ls` Permission denied (fixed since).

@@ -1,6 +1,8 @@
 # Kodrix — Handoff (cloud → local)
 
-Last updated: 2026-09-25 (local Windows session: first local APK build, push-session skill).
+Last updated: 2026-09-27 (local Windows session: terminal git and language-server fixes
+verified on device; security/community docs; VS Code extensions plan; Phase A experimental
+editor built, awaiting device test).
 Originally written at the end of a long cloud session so work can continue locally. Read this
 first; details live in the linked docs.
 
@@ -44,7 +46,7 @@ install its language server (today it's always installed).
 
 | Repo | Branch with the new work | Merged to `main`? |
 |---|---|---|
-| `Zohaib8090/KodrixIDE` | `claude/confident-rubin-3wc23a` | **Yes** (as of 2026-09-25, `main` = branch = `808e3f6`; work continues on the branch) |
+| `Zohaib8090/KodrixIDE` | `claude/confident-rubin-3wc23a` | **Partly.** `main` = `15f5599` (PRs #9–#12 merged 2026-09-26). The branch is ahead with the VS Code extensions plan and the **Phase A experimental editor (`c933f1a`), not merged until the owner tests it** |
 | `Zohaib8090/KodrixMarketplace` | `claude/confident-rubin-3wc23a` | **No** — registry v2, Node from Termux, weekly check |
 
 Earlier work from this session (docs move, AI agent migration, first CI) was merged as PR #8.
@@ -61,7 +63,8 @@ git pull
 ```
 
 **Rules agreed with the owner (keep following them):**
-- Keep working on `claude/confident-rubin-3wc23a` in both repos; the owner merges to `main`.
+- Keep working on `claude/confident-rubin-3wc23a` in both repos. Merge to `main` only when
+  the owner says so, via a PR from the branch (`gh pr create` + `gh pr merge --merge`).
 - **Before every commit + push, ask who gets credit:** *Only me* (author Zohaib Baig
   <zohaibbaig144@gmail.com>, no Claude line) / *Me + Claude* (author Zohaib + a
   `Co-Authored-By: Claude` line) / *Only Claude*. Don't push until answered.
@@ -99,6 +102,15 @@ for the phone; the universal APK is ≈ 515 MB). Gotchas hit and fixed:
   ./gradlew :androidApp:assembleDebug
   ```
   When Claude runs this, the Bash sandbox must be disabled, because Gradle needs loopback sockets.
+  (`cmd /c gradlew.bat …` from PowerShell failed on path quoting; use Git Bash `./gradlew`.)
+- **App module compiles as Java 17** (`androidApp/build.gradle.kts`, since 2026-09-26). With
+  Java 8, D8 fails on the Java `record` classes in Sora's TextMate library: "Attempt to create
+  a global synthetic for 'Record desugaring' without a global-synthetics consumer". Library
+  desugaring and `android.enableGlobalSyntheticsGeneration` did not fix it; Java 17 did.
+- **Sora Editor version**: 0.24.4. 0.24.5+ requires compileSdk 36 and Kotlin 2.3; this project
+  is on compileSdk 34 / Kotlin 2.1.0. Upgrading Sora means upgrading those first.
+- No Android emulator is set up on the PC (no system images), so device testing is the
+  owner's phone via CI APKs.
 - **Termux + proot on the phone**: building the APK there hasn't been tried. The Android
   SDK/NDK don't officially support that host, so use CI (push to the branch and download the
   `arm64-v8a` artifact) or build on the PC.
@@ -107,7 +119,34 @@ for the phone; the universal APK is ≈ 515 MB). Gotchas hit and fixed:
 
 ## 3. What was built (newest first)
 
-### 3.1 UX fixes (latest, **not yet tested on device**)
+### 3.0 Session of 2026-09-25 → 27 (local Windows)
+- **Phase A experimental editor** (`c933f1a`, branch only, **untested on device**). Settings →
+  Developer → *Experimental editor* (off by default) swaps the text area for Sora Editor
+  0.24.4 with VS Code TextMate grammars for 14 languages and the Dark Modern theme
+  (`ui/SoraCodeEditor.kt`, `androidApp/src/main/assets/textmate/`, regenerate with
+  `node scripts/build-textmate-assets.mjs`). Tabs, toolbar, completion dropdown and problems
+  panel are unchanged; edits go through `updateEditorText(…, smartIndent = false)`; accepted
+  completions are applied as a minimal replace so scroll and undo survive; LSP diagnostics are
+  squiggles. CI run 36231296866 passed. Plan: `documents/VSCODE_EXTENSIONS.md` (approved;
+  decisions in §11). Next: Phase B (install `.vsix` + themes).
+- **Language servers failed on every start, "exit 1"** (PR #12, **owner confirmed fixed**):
+  `files/lsp/package.json` was written truncated (since the codebase migration), so Node
+  refused to run there (`ERR_INVALID_PACKAGE_CONFIG`). It's now valid and rewritten if broken.
+  npm's output goes to `files/lsp/install.log`, and the toast shows the real error.
+- **`usr/bin/git: Permission denied` on terminal start** (PR #9, **confirmed fixed**: `node
+  v25.8.2`, `npm 11.16.0`, `git 2.54.0` work). Android 10+ won't exec scripts in app storage
+  either. Built-in git/node/git-remote-http(s) are symlinks into the APK's native lib dir again
+  (`WrapperManager.writeNotInstalledScript`, safe-mode wrappers), and `init.sh` defines a
+  shell function per remaining wrapper script so it runs via `/system/bin/sh`. This was a
+  regression from the "Faster startup" commit `99d6e8f`.
+- **Community/security docs** (PRs #9–#11): `SECURITY.md` (private reporting via GitHub
+  advisories, supported = v1.1.2 + main/CI, contributor security rules), `CODE_OF_CONDUCT.md`
+  (Contributor Covenant 2.1 based, reports to the owner's email), `CONTRIBUTING.md` (PR
+  standards, AI-assisted contributions accepted with disclosure + test results + screenshots),
+  `.github/pull_request_template.md`.
+- **push-session skill** (`.claude/skills/push-session/`) and Windows build notes (§2.1).
+
+### 3.1 UX fixes (cloud session; keyboard/startup/permissions still to check on device)
 - **Keyboard:** focusing a side-panel field (Runtimes search etc.) no longer pushes the
   terminal up; typing in terminal/editor still lifts them. `ui/IDEView.kt` (`sidebarFocused`).
 - **Terminal start dir:** with no project open it used `/` (unreadable → `ls: Permission
@@ -165,9 +204,25 @@ AutoAgent/AgentPanel system; shell-injection fix; CI APK workflow; Native Exec B
 
 ## 4. Status / what's unverified
 
-**2026-09-25:** the latest `main` (`808e3f6`) builds locally. The owner has **not yet
-installed or tested it on the phone**, so everything in the list below is still open. That
-test pass is the next step.
+**2026-09-27, next steps in order:**
+1. The owner tests the **Phase A experimental editor** from CI run 36231296866
+   (artifact `kodrix-debug-apk-arm64-v8a`): switch off = unchanged; switch on = highlighting,
+   typing/auto-indent/auto-close, completion popup, save + modified dot, error squiggles, split
+   view, tab switching. If it's good, merge the branch to `main` via PR, then start Phase B.
+2. Runtime tests below (Rust first; the owner postponed it because it's a big download on
+   mobile data).
+
+Facts: latest published release is **v1.1.2** (2026-06-18); `versionName` 1.2.0 in
+`androidApp/build.gradle.kts` is unreleased. minSdk 28, targetSdk 34, compileSdk 34 (the README
+still says "Android 10+ / API 29"). Update SECURITY.md's supported-versions table when 1.2.0
+ships.
+
+Watch item: npm is configured to use `usr/bin/sh` as its shell (`NPM_CONFIG_SHELL`), which is
+itself a script in app storage. `npm install` works; if `npm run <script>` fails with
+"Permission denied", that's the cause.
+
+CI housekeeping (not done): the workflow warns that Node 20 actions are deprecated and
+`actions/setup-java@v4` should move to v5.
 
 Repo hygiene flagged (not acted on, owner to decide): `kodrix.jks` (a signing keystore) and
 two `google-services.json` files are committed to the public repo. If `kodrix.jks` signs
@@ -175,8 +230,9 @@ release APKs, rotate it and purge it from history. `scratch/` (>1,000 extracted 
 is committed despite being in `.gitignore`. `TerminalViewModel.kt` is ~3.9k lines doing
 almost everything, and there are no tests.
 
-Confirmed by owner on device (older build): Rust installed from Runtimes; `rustup`/`rust`
-"not found" (expected — now explained); `ls` Permission denied (fixed since).
+Confirmed by owner on device: terminal `node`/`npm`/`git` work and the language servers
+install (2026-09-26, `main` builds). From an older build: Rust installed from Runtimes;
+`rustup`/`rust` "not found" (expected, now explained); `ls` Permission denied (fixed since).
 
 **Not yet verified on a device** (all compile in CI):
 1. Downloaded Node: switch to Latest → `node -v` shows it (depends on linker64 launch + the

@@ -1,7 +1,7 @@
-# VS Code Extensions — Plan (draft for owner review)
+# VS Code Extensions — Plan
 
-**Status:** Draft, 2026-09-26. Nothing here is built yet. The owner reviews this before any
-work starts; open questions are collected in §11.
+**Status:** Approved by the owner on 2026-09-26 (decisions in §11). Nothing is built yet; work
+starts with Phase A.
 
 ## 0. Goal
 
@@ -72,8 +72,18 @@ Android View) is a mature open-source Android code editor with built-in:
 - incremental rendering (large files stay smooth),
 - auto-completion popup, line numbers, bracket matching, diagnostics underlines, pinch zoom.
 
+**Opt-in only (owner decision).** The current editor stays the default for everyone. Sora
+Editor is used only when the user turns on **Settings → Developer → Experimental editor**
+(off by default, takes effect when files are reopened). Themes, grammars and snippets from
+extensions (Phase B/C) only apply in the experimental editor; the Marketplace says so, with a
+link to the switch. The experimental editor becomes the default only when the owner decides
+it's ready, as a separate change.
+
 **Plan:**
-- Embed it in Compose with `AndroidView` inside `CodeEditor.kt`, keeping the existing
+- Add the `Experimental editor` switch to the Developer section of `ui/SettingsView.kt`
+  (stored in prefs like Beta Mode). `CodeEditor.kt` picks the editor by that switch; the
+  current `BasicTextField` editor is left untouched.
+- Embed Sora in Compose with `AndroidView` inside `CodeEditor.kt`, keeping the existing
   viewport/tab/split logic in `TerminalViewModel` unchanged.
 - Bridge the existing LSP features: completion → Sora's completion provider; diagnostics →
   Sora's diagnostics container; `applyCompletion` logic reused.
@@ -81,11 +91,12 @@ Android View) is a mature open-source Android code editor with built-in:
   same languages, then delete it.
 - **Licensing:** LGPL-2.1 is fine for an MIT app when used as an unmodified library
   dependency. Add it to README acknowledgements.
-- **Desktop app:** Sora is Android-only. The desktop editor keeps its current highlighting for
-  now (see §11, Q6).
+- **Desktop app:** out of scope for now (owner decision). Sora is Android-only; the desktop
+  editor keeps its current highlighting.
 
-**Acceptance:** opening, editing, saving, tabs, split view, LSP completion and diagnostics all
-work as today; a 10,000-line file scrolls and types without visible lag on the owner's Samsung.
+**Acceptance:** with the switch **off**, nothing changes. With it **on**: opening, editing,
+saving, tabs, split view, LSP completion and diagnostics all work as in the current editor, and a
+10,000-line file scrolls and types without visible lag on the owner's Samsung.
 
 ## 4. Level 1 — declarative extensions
 
@@ -178,7 +189,7 @@ Stopped automatically after 10 min idle: Vue language server
 
 - **Idle stop:** servers with no matching file open for N minutes (default 10, adjustable) are
   stopped and restart automatically when needed.
-- **Limit:** a setting for the maximum number of servers running at once (default 3); when
+- **Limit:** a setting for the maximum number of servers running at once (default 5); when
   exceeded, the least recently used one is stopped, with a small notice.
 
 ### 5.4 Conflicts
@@ -194,8 +205,10 @@ extension breaks the editor). The existing runtime Safe Mode can turn this on to
 ### 5.6 Where the choices are stored
 - **Global** choices: `files/extensions/state.json` (not SharedPreferences: easier to back up and
   inspect; written atomically).
-- **Per-project** choices: `<project>/.kodrix/extensions.json`, so they travel with the project
-  (git clone on another device keeps the same setup). Contains only IDs and switches, no files.
+- **Per-project** choices: kept **on the device only** (owner decision), in
+  `files/extensions/projects/<project-name>.json`, never inside the project folder, so nothing
+  extension-related ends up in the user's repos. Contains only IDs and switches. Deleting or
+  renaming a project deletes or renames its file.
 - The existing `disabled_extensions` pref is migrated into `state.json` once, then removed.
 
 ## 6. Data model
@@ -275,10 +288,10 @@ Each phase ships on its own and is tested on the owner's phone before the next.
 
 | Phase | Work | Done when |
 |---|---|---|
-| **A. Editor swap** | Sora Editor in `CodeEditor.kt`; LSP completion + diagnostics bridged; built-in grammars + default dark/light theme | Everything the editor does today still works; big files are smooth; highlighting for the built-in languages |
+| **A. Experimental editor** | Settings → Developer → Experimental editor switch (off by default); Sora Editor behind it; LSP completion + diagnostics bridged; built-in grammars + default dark/light theme | Switch off: nothing changes. Switch on: everything the editor does today still works, big files are smooth, highlighting for the built-in languages |
 | **B. Install + themes** | `.vsix` download/verify/extract; `ExtensionManifest` parser; color + icon themes; Extensions list with Installed tab | Installing "One Dark Pro" from Open VSX changes the editor colors; an icon theme changes explorer icons |
 | **C. Grammars, languages, snippets** | Register grammars and language configs; snippets in completion | Installing a grammar-only language extension adds highlighting for a new file type; snippets show up |
-| **D. Control system** | States, per-project storage, per-feature switches, conflicts, "Start without extensions" | Owner can enable/disable globally and per project; choices survive restart and travel with a cloned project |
+| **D. Control system** | States, per-project storage, per-feature switches, conflicts, "Start without extensions" | Owner can enable/disable globally and per project; choices survive an app restart |
 | **E. Language servers** | `vscodeServers` registry + launcher; Running panel; idle stop; server limit; first-run prompt | Installing YAML gives YAML autocomplete; the server appears in Running, stops when idle, and can be stopped/disabled |
 | **F. Updates** | Update check, Update button, auto-update switch, rollback | A newer Open VSX version shows Update; installing it keeps the old one until the new one loads |
 
@@ -291,25 +304,23 @@ Each phase ships on its own and is tested on the owner's phone before the next.
   to Open VSX.
 - **Debug adapters (DAP), notebooks, webview panels.**
 
-## 11. Open questions for the owner
+## 11. Owner decisions (2026-09-26)
 
-1. **Editor swap (Phase A):** OK to replace the current editor with Sora Editor? It's the
-   biggest change, but Level 1 isn't practical without it.
-2. **Default for new language-server extensions:** start "When I open a matching file" (lazy,
-   recommended) or "Never" until you turn it on?
-3. **Idle stop time and server limit:** 10 minutes and 3 servers OK?
-4. **Per-project settings file** (`.kodrix/extensions.json`) committed with projects: OK, or
-   keep all choices on the device only?
-5. **Auto-update extensions:** off by default OK?
-6. **Desktop app:** Android only for now, or should the desktop app get extensions too (needs a
-   different editor component)?
-7. **Order:** is A→F right, or do you want the control system (D) earlier?
+| # | Question | Decision |
+|---|---|---|
+| 1 | Replace the current editor with Sora Editor (Phase A)? | **Opt-in only.** Build it, but the current editor stays the default; Sora runs only when Settings → Developer → Experimental editor is turned on. Making it the default is a later, separate decision |
+| 2 | Default start for language-server extensions | **When a matching file opens** (lazy) |
+| 3 | Idle stop time / max servers running | **10 minutes / 5 servers**, both adjustable in Settings |
+| 4 | Where per-project choices are stored | **On the device only**, not inside the project (§5.6) |
+| 5 | Auto-update extensions | **Off by default**, show an Update button, keep the old version for rollback |
+| 6 | Desktop app | **Android only for now** |
+| 7 | Phase order | **A → F as planned** |
 
 ## 12. Risks
 
 | Risk | Mitigation |
 |---|---|
-| Editor swap breaks existing editing features | Phase A alone, feature-parity checklist, keep old editor behind a setting until verified |
+| New editor breaks existing editing features | It's opt-in (Developer → Experimental editor), so the default editor is never affected; feature-parity checklist before it could ever become the default |
 | TextMate highlighting too slow on low-end phones | Sora highlights incrementally in the background; built-in grammars tested on an old armeabi-v7a device/emulator |
 | Server extensions change their bundle layout between versions | Launch rules are in the registry, so they can be fixed without an app update; weekly registry check (like runtimes) resolves each `command` path against the latest `.vsix` |
 | Several servers use too much RAM | Lazy start, idle stop, server limit, Running panel |

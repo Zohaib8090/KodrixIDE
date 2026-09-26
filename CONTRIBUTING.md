@@ -122,9 +122,9 @@ extra rules, because AI tools can produce code that looks right but was never ac
 Pull requests that clearly haven't been run or read (made-up APIs, code that can't build,
 missing test evidence) will be closed with a note asking for these points to be covered.
 
-A maintainer will review your pull request. Changes may be requested. That's normal and not
+The project owner, [@Zohaib8090](https://github.com/Zohaib8090), will review your pull request. Changes may be requested. That's normal and not
 a judgement of you, it's how we keep the project stable. Please be patient: Kodrix is
-maintained by one person.
+built and run by one person.
 
 ## License
 

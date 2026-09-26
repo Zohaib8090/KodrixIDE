@@ -6,7 +6,7 @@ pull request. We want every one of them to feel welcome and safe.
 
 ## Our pledge
 
-We, as contributors and maintainers, pledge to make taking part in Kodrix a
+We, as contributors and the project owner, pledge to make taking part in Kodrix a
 harassment-free experience for everyone. That applies regardless of age, body size,
 disability, ethnicity, sex characteristics, gender identity and expression, level of
 experience, education, social or economic status, nationality, personal appearance, race,
@@ -42,11 +42,11 @@ when posting as Kodrix on social media.
 
 ## Reporting
 
-If you experience or witness unacceptable behavior, report it to the maintainer,
+If you experience or witness unacceptable behavior, report it to the project owner,
 [@Zohaib8090](https://github.com/Zohaib8090), by email at
 **zohaibbaig144@gmail.com**. Put "Kodrix Code of Conduct" in the subject line.
 
-All reports will be reviewed promptly and fairly. The maintainer will respect the privacy
+All reports will be reviewed promptly and fairly. The owner will respect the privacy
 and safety of the person who reported the incident.
 
 Please don't use the security vulnerability form for conduct reports. That form is only
@@ -54,7 +54,7 @@ for security problems in the software.
 
 ## Enforcement
 
-The maintainer decides what counts as a violation. Depending on how serious it is, one of
+The project owner decides what counts as a violation. Depending on how serious it is, one of
 these steps will be taken:
 
 1. **Correction.** For a minor slip, such as unprofessional language: a private message
@@ -67,7 +67,7 @@ these steps will be taken:
 4. **Permanent ban.** For a pattern of violations, harassment of a person, or aggression
    toward or disparagement of groups of people: a permanent ban from the project.
 
-The maintainer may remove, edit or reject comments, commits, code, issues and other
+The project owner may remove, edit or reject comments, commits, code, issues and other
 contributions that break this Code of Conduct.
 
 ## Attribution

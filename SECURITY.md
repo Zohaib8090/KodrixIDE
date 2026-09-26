@@ -30,7 +30,7 @@ Report it privately instead:
 
 ### What happens next
 
-Kodrix is maintained by one developer, so these are targets rather than guarantees:
+Kodrix is run by its owner, [@Zohaib8090](https://github.com/Zohaib8090), so these are targets rather than guarantees:
 
 | Step | Target |
 |---|---|

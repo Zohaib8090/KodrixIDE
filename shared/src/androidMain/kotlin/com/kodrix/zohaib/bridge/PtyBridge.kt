@@ -703,6 +703,20 @@ class PtyBridge {
             export SHELL="$usrBinDir/sh"
             export NPM_CONFIG_SHELL="$usrBinDir/sh"
 
+            # Android 10+ won't execve() any file in app storage, wrapper scripts included
+            # ("Permission denied"). Bundled tools are symlinks into the APK, which is
+            # allowed; every remaining wrapper script (npm, npx, gh, downloaded runtimes, hint
+            # messages) gets a shell function that runs it through sh, so typing its name at
+            # the prompt works. Names that aren't valid function names (clang++, a-b) are skipped.
+            if [ -f "$filesDir/safe_mode" ]; then _kbin="$filesDir/usr/bin_safe"; else _kbin="$usrBinDir"; fi
+            for _kf in "${'$'}_kbin"/*; do
+                [ -f "${'$'}_kf" ] && [ ! -L "${'$'}_kf" ] || continue
+                _kn="${'$'}{_kf##*/}"
+                case "${'$'}_kn" in ''|[0-9]*|*[!A-Za-z0-9_]*) continue ;; esac
+                eval "${'$'}_kn() { /system/bin/sh \"${'$'}_kf\" \"\${'$'}@\"; }"
+            done
+            unset _kbin _kf _kn
+
             # Python Environment Integration
             if [ -f "$filesDir/active_python_version" ]; then
                 export PYTHON_ACTIVE_VERSION=${'$'}(cat "$filesDir/active_python_version")

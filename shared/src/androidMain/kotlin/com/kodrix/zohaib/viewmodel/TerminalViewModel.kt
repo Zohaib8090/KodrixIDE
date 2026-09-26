@@ -1999,12 +1999,18 @@ class TerminalViewModel(application: Application) : AndroidViewModel(application
             lspDir.mkdirs()
             
             val packageJson = java.io.File(lspDir, "package.json")
-            if (!packageJson.exists()) {
+            // Rewrite it if it's missing or unreadable: older builds wrote a truncated file,
+            // and Node refuses to start at all inside a folder with an invalid package.json.
+            val packageJsonValid = try {
+                org.json.JSONObject(packageJson.readText()); true
+            } catch (_: Exception) { false }
+            if (!packageJsonValid) {
                 packageJson.writeText("""
                     {
-                      "name": "codeoss-lsp",
+                      "name": "kodrix-lsp",
                       "version": "1.0.0",
-                      "description": "L
+                      "description": "Language servers used by the Kodrix editor",
+                      "private": true
                     }
                 """.trimIndent())
             }
@@ -2076,10 +2082,20 @@ class TerminalViewModel(application: Application) : AndroidViewModel(application
                 
                 val process = pb.start()
                 val reader = process.inputStream.bufferedReader()
+                // Keep npm's full output so a failure can be explained instead of just "exit 1".
+                val installLog = java.io.File(lspDir, "install.log")
+                val logWriter = installLog.bufferedWriter()
+                var lastError: String? = null
                 var line: String?
                 var lastToastTime = 0L
                 while (reader.readLine().also { line = it } != null) {
                     Log.d("Kodrix", "LSP Install: $line")
+                    logWriter.write(line!!); logWriter.newLine()
+                    val trimmed = line!!.trim()
+                    if ((trimmed.startsWith("npm error") || trimmed.startsWith("npm ERR!") || trimmed.startsWith("Error:")) &&
+                        trimmed.length > 12 && lastError == null) {
+                        lastError = trimmed
+                    }
                     // Show periodic progress toasts without spamming
                     val now = System.currentTimeMillis()
                     val currentLine = line ?: ""
@@ -2101,12 +2117,19 @@ class TerminalViewModel(application: Application) : AndroidViewModel(application
                 }
                 
                 val exitCode = process.waitFor()
+                logWriter.close()
                 withContext(Dispatchers.Main) {
                     if (exitCode == 0) {
                         successMarker.writeText(System.currentTimeMillis().toString())
                         android.widget.Toast.makeText(getApplication(), "✅ Language Servers ready! Open any .ts, .html, .css, .json file.", android.widget.Toast.LENGTH_LONG).show()
                     } else {
-                        android.widget.Toast.makeText(getApplication(), "❌ Language Server install failed (exit $exitCode)", android.widget.Toast.LENGTH_LONG).show()
+                        val reason = lastError ?: "exit $exitCode"
+                        appendLogcat("LSP install failed (exit $exitCode): $reason — full log: ${installLog.absolutePath}")
+                        android.widget.Toast.makeText(
+                            getApplication(),
+                            "❌ Language Server install failed: $reason\nFull log: files/lsp/install.log",
+                            android.widget.Toast.LENGTH_LONG
+                        ).show()
                     }
                 }
             } catch (e: Exception) {

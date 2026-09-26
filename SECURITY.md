@@ -11,8 +11,9 @@ on the newest APK from [Releases](https://github.com/Zohaib8090/KodrixIDE/releas
 
 | Version | Supported |
 |---|---|
-| Latest release (1.2.x) | ✅ |
-| Older releases | ❌ Please update |
+| 1.1.2 (latest release) | ✅ |
+| `main` branch / CI builds | ✅ |
+| 1.1.1 and older | ❌ Please update |
 
 ## Reporting a vulnerability
 

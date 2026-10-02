@@ -116,6 +116,37 @@ for the phone; the universal APK is ≈ 515 MB). Gotchas hit and fixed:
   SDK/NDK don't officially support that host, so use CI (push to the branch and download the
   `arm64-v8a` artifact) or build on the PC.
 
+### 2.2 Local build and tests in the cloud VM (set up 2026-10-02)
+The cloud VM (Linux x86_64, 4 CPUs, 15 GB) can compile the app and run JVM tests, which is
+faster than waiting for CI. It **cannot run Android**: no `/dev/kvm`, no binder, so no emulator;
+device behaviour is still only tested on the owner's phone. The VM is ephemeral, so redo the
+setup in a new session (~10 min, mostly downloads):
+```bash
+apt-get update && apt-get install -y openjdk-17-jdk-headless        # CI uses JDK 17
+export JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64 ANDROID_HOME=/opt/android-sdk
+# cmdline-tools from https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip
+#   -> $ANDROID_HOME/cmdline-tools/latest ; then:
+yes | sdkmanager --licenses
+sdkmanager "platform-tools" "platforms;android-34" "build-tools;34.0.0" "ndk;30.0.14904198" "cmake;3.22.1"
+echo "sdk.dir=/opt/android-sdk" > local.properties                  # gitignored
+```
+Maven Central answers **429** to the VM, so add `~/.gradle/init.d/maven-central-mirror.gradle`
+that rewrites `repo.maven.apache.org` to `https://maven-central.storage-download.googleapis.com/maven2/`
+(`beforeSettings { … repos.configureEach { if it's a MavenArtifactRepository … repo.url = mirror } }`;
+not committed, because it's an environment workaround).
+
+| Command | Time here | Notes |
+|---|---|---|
+| `./gradlew :shared:compileDebugKotlinAndroid --no-daemon -q` | ~2 min (first run, with downloads) | compile check only |
+| `./gradlew :shared:testDebugUnitTest --no-daemon -q` | ~40 s | 31 JVM tests in `shared/src/androidUnitTest` (`TermuxRepo`, `BuiltinCatalog`, `RuntimeManifest`, `RuntimeExec`) |
+| `./gradlew :androidApp:assembleDebug -Pandroid.injected.build.abi=arm64-v8a --no-daemon -q` | ~3½ min | arm64 only; APK lands in `androidApp/build/intermediates/apk/debug/` (a normal build uses `outputs/`) |
+| `scripts/apk-report.sh` | seconds | size, permissions, native libs per ABI, assets, biggest entries |
+
+The APK is ~222 MB and can't be sent from the VM (chat limit ~30 MB, GitHub 100 MB per file), so
+CI remains how builds reach the phone. Size finding: about **83 MB uncompressed is duplicate
+native libraries** (soname copies such as `libicudata.so`, `libicudata.so.78.so`,
+`libicudata.so.78.3.so`, 32 MB each) — could be shipped once and linked at first run; not done.
+
 ---
 
 ## 3. What was built (newest first)

@@ -117,6 +117,14 @@ Things that already bit us in this project. Check here before debugging somethin
   `unzip -l` before trusting a download.
 - CI logs from the GitHub tool can be huge single-line JSON; parse them with python and grep
   for ` e: ` to find Kotlin errors.
+- **Cloud VM builds** (details in `HANDOFF.md` §2.2): Maven Central returns 429 to the VM (use
+  the Google mirror via a `~/.gradle/init.d` script), `apt` needs `apt-get update` before
+  installing, and a single-ABI build (`-Pandroid.injected.build.abi=…`) writes the APK to
+  `build/intermediates/apk/debug/`, not `outputs/`. `scripts/*.sh` is gitignored, so a new script
+  needs a `!scripts/name.sh` exception. In a bash script with `set -o pipefail`, `ls missing | head`
+  fails the whole `$(…)`, so add `|| true`.
+- **Unit tests prove nothing until they've failed once.** Break the code on purpose and confirm
+  the tests go red (we did for the shebang fallback and the symlink-escape check).
 - Debug APK is built per ABI; the owner's phone needs **`arm64-v8a`** (not universal).
 
 ## Process

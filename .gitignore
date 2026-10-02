@@ -51,6 +51,7 @@ log.txt
 !STATE.md
 !CURRENT_TASK.md
 scripts/*.sh
+!scripts/apk-report.sh
 !scripts/
 !app/src/main/jniLibs/
 temp-build/  

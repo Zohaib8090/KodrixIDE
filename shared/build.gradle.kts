@@ -55,6 +55,14 @@ kotlin {
                 implementation("com.google.firebase:firebase-analytics")
             }
         }
+        // JVM unit tests for the runtime code: ./gradlew :shared:testDebugUnitTest
+        val androidUnitTest by getting {
+            dependencies {
+                implementation("junit:junit:4.13.2")
+                // android.jar's org.json is a stub that throws in unit tests; use the real one.
+                implementation("org.json:json:20240303")
+            }
+        }
         val desktopMain by getting {
             dependencies {
                 implementation(compose.desktop.currentOs)

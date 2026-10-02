@@ -5,6 +5,7 @@ verified on device; security/community docs; VS Code extensions plan; Phase A ex
 editor built, awaiting device test).
 Originally written at the end of a long cloud session so work can continue locally. Read this
 first; details live in the linked docs.
+**Pitfalls we already hit: `documents/gotcha.md`.**
 
 ---
 

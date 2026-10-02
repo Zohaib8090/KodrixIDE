@@ -11,6 +11,8 @@ app update. Full mission: `documents/HANDOFF.md` §0.
 Start with `documents/HANDOFF.md` (current state, branches, what's untested),
 `documents/LANGUAGE_PACKS.md` (runtime system design and registry schema) and
 `documents/VSCODE_EXTENSIONS.md` (approved VS Code extensions plan, in progress).
+Read `documents/gotcha.md` before debugging anything odd — it lists pitfalls we already hit
+(Android exec limits, Termux quirks, build traps). Add to it whenever you hit a new one.
 
 ## Working rules (from the owner)
 - Work on branch `claude/confident-rubin-3wc23a` (both KodrixIDE and KodrixMarketplace).

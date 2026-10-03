@@ -123,6 +123,13 @@ Things that already bit us in this project. Check here before debugging somethin
   `build/intermediates/apk/debug/`, not `outputs/`. `scripts/*.sh` is gitignored, so a new script
   needs a `!scripts/name.sh` exception. In a bash script with `set -o pipefail`, `ls missing | head`
   fails the whole `$(…)`, so add `|| true`.
+- **Dependabot alerts can't be read from the cloud session** (`gh api …/dependabot/alerts` → 403).
+  The repo has no `dependabot.yml`, so it raises alerts but opens no PRs. Check by hand instead:
+  `npm audit --package-lock-only` in `agentServer/`, and for the app dump
+  `./gradlew :androidApp:dependencies --configuration debugRuntimeClasspath` and post the
+  `group:artifact:version` list to `https://api.osv.dev/v1/querybatch` (ecosystem `Maven`). A
+  transitive library can be forced up with a `constraints { implementation("g:a:v") }` block in
+  `androidApp/build.gradle.kts`. (2026-10-03: fastify, fast-uri, ktor 2.3.8 and guava 31.1 fixed.)
 - **Unit tests prove nothing until they've failed once.** Break the code on purpose and confirm
   the tests go red (we did for the shebang fallback and the symlink-escape check).
 - Debug APK is built per ABI; the owner's phone needs **`arm64-v8a`** (not universal).

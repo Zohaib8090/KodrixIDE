@@ -68,6 +68,14 @@ android {
 }
 
 dependencies {
+    // Guava 31.1 arrives transitively via Firebase/Play services; 31.1 has two published
+    // advisories (insecure temp directory, information disclosure), fixed in 32.0.0.
+    constraints {
+        implementation("com.google.guava:guava:32.0.0-android") {
+            because("GHSA-7g45-4rm6-3mm3, GHSA-5mg8-w23w-74h3")
+        }
+    }
+
     implementation(project(":shared"))
 
     // Compose (for MainActivity)

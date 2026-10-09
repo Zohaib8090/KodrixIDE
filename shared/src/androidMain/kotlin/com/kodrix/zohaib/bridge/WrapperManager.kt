@@ -108,6 +108,7 @@ object WrapperManager {
 
             if (stagingDir.renameTo(usrBinDir)) {
                 oldBackupDir.deleteRecursively()
+                markWrappersChanged(filesDir)
                 Log.i(TAG, "Wrappers atomically updated (${configs.sumOf { it.wrappers.size }} entries)")
             } else {
                 // Restore backup if renaming stagingDir to usrBinDir failed
@@ -117,6 +118,7 @@ object WrapperManager {
                 // Try Files.move as a final effort
                 try {
                     Files.move(stagingDir.toPath(), usrBinDir.toPath(), StandardCopyOption.REPLACE_EXISTING)
+                    markWrappersChanged(filesDir)
                     Log.i(TAG, "Wrappers updated via Files.move fallback")
                 } catch (moveEx: Exception) {
                     throw RuntimeException("Failed to rename staging directory usr/bin_new to usr/bin: ${moveEx.message}", moveEx)
@@ -126,6 +128,18 @@ object WrapperManager {
         } catch (e: Exception) {
             Log.e(TAG, "Failed to recreate wrappers — staging dir left intact for diagnostics", e)
             // Leave staging dir in place for post-mortem inspection; live bin/ is unaffected.
+        }
+    }
+
+    /**
+     * Tells already-open terminals that usr/bin changed. init.sh compares this file's
+     * content before each prompt and redefines its command functions when it differs.
+     */
+    private fun markWrappersChanged(filesDir: File) {
+        try {
+            File(filesDir, "usr/.wrappers_stamp").writeText(System.nanoTime().toString() + "\n")
+        } catch (e: Exception) {
+            Log.w(TAG, "Couldn't write wrappers stamp: ${e.message}")
         }
     }
 

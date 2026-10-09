@@ -1235,7 +1235,10 @@ class BinaryManager(private val context: Context) {
         updateAppNotification(
             id = "${tool}_$version",
             title = if (success) "${tool.uppercase()} Installed" else "${tool.uppercase()} Installation Failed",
-            text = if (success) "Version $version is ready to use!" else "Failed: ${error ?: "Unknown error"}",
+            text = if (success) {
+                "Version $version is ready to use!" +
+                    if (tool == "pylsp") "" else " In an open terminal, press Enter once so it picks up the new commands."
+            } else "Failed: ${error ?: "Unknown error"}",
             progress = null,
             isOngoing = false
         )

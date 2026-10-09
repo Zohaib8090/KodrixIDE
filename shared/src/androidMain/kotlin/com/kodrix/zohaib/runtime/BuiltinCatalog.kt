@@ -203,6 +203,7 @@ object BuiltinCatalog {
         "description": "Autocomplete for links and headings in .md files (marksman).",
         "languages": { "md": "markdown", "markdown": "markdown" },
         "binaries": ["marksman"],
+        "env": { "DOTNET_SYSTEM_GLOBALIZATION_INVARIANT": "1", "DOTNET_EnableWriteXorExecute": "0" },
         "lsp": { "command": ["%install%/bin/marksman", "server"] },
         "versions": [ { "packages": ["marksman"] } ]
       },

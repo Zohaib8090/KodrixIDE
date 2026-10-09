@@ -369,7 +369,10 @@ class TerminalViewModel(application: Application) : AndroidViewModel(application
 
                 // Python
                 val pythonVerified = verified["python"]
-                if (pythonVerified != null && pythonVerified.isVerified) {
+                // A Python installed from Runtimes ships with its own language server (Pyright),
+                // so the old pylsp installer is skipped for it: it launched python3 directly,
+                // which Android blocks ("PYLSP Installation Failed … exit 126").
+                if (pythonVerified != null && pythonVerified.isVerified && binaryManager.languageRuntimeFor("py") == null) {
                     val pythonDir = findPythonInstallDir(application.filesDir)
                     if (pythonDir != null) {
                         val pylspBin = java.io.File(pythonDir, "bin/pylsp")

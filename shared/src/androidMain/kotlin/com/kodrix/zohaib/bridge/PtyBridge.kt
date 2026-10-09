@@ -708,14 +708,34 @@ class PtyBridge {
             # allowed; every remaining wrapper script (npm, npx, gh, downloaded runtimes, hint
             # messages) gets a shell function that runs it through sh, so typing its name at
             # the prompt works. Names that aren't valid function names (clang++, a-b) are skipped.
-            if [ -f "$filesDir/safe_mode" ]; then _kbin="$filesDir/usr/bin_safe"; else _kbin="$usrBinDir"; fi
-            for _kf in "${'$'}_kbin"/*; do
-                [ -f "${'$'}_kf" ] && [ ! -L "${'$'}_kf" ] || continue
-                _kn="${'$'}{_kf##*/}"
-                case "${'$'}_kn" in ''|[0-9]*|*[!A-Za-z0-9_]*) continue ;; esac
-                eval "${'$'}_kn() { /system/bin/sh \"${'$'}_kf\" \"\${'$'}@\"; }"
-            done
-            unset _kbin _kf _kn
+            _kdefs() {
+                if [ -f "$filesDir/safe_mode" ]; then _kbin="$filesDir/usr/bin_safe"; else _kbin="$usrBinDir"; fi
+                for _kf in "${'$'}_kbin"/*; do
+                    [ -f "${'$'}_kf" ] && [ ! -L "${'$'}_kf" ] || continue
+                    _kn="${'$'}{_kf##*/}"
+                    case "${'$'}_kn" in ''|[0-9]*|*[!A-Za-z0-9_]*) continue ;; esac
+                    eval "${'$'}_kn() { /system/bin/sh \"${'$'}_kf\" \"\${'$'}@\"; }"
+                done
+                unset _kbin _kf _kn
+            }
+            _kdefs
+
+            # A runtime installed (or switched, paused, removed) while this terminal is open
+            # rewrites the wrappers and bumps a stamp file. Before each prompt the shell
+            # compares the stamp and redefines the functions, so new commands work without
+            # opening a new terminal. ${'$'}{ list;} runs in the current shell (mksh); if this
+            # shell can't do that, nothing changes and only new terminals see new commands.
+            _kstamp="$filesDir/usr/.wrappers_stamp"
+            _kver=""
+            [ -r "${'$'}_kstamp" ] && read -r _kver < "${'$'}_kstamp"
+            _kcheck() {
+                _kv=""
+                [ -r "${'$'}_kstamp" ] && read -r _kv < "${'$'}_kstamp"
+                if [ "${'$'}_kv" != "${'$'}_kver" ]; then _kver="${'$'}_kv"; _kdefs; fi
+            }
+            if [ "${'$'}(eval 'echo ${'$'}{ echo ok;}' 2>/dev/null)" = ok ]; then
+                PS1='${'$'}{ _kcheck;}'"${'$'}{PS1:-\$ }"
+            fi
 
             # Python Environment Integration
             if [ -f "$filesDir/active_python_version" ]; then

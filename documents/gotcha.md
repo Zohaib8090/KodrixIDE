@@ -19,6 +19,23 @@ Things that already bit us in this project. Check here before debugging somethin
   wrapper script** (npm, npx, gh, downloaded runtimes, hint messages) that runs it via
   `/system/bin/sh`. So typing a command at the prompt works, but anything that `execve()`s a
   wrapper by path (a build tool, `npm run`) still can't.
+- **A program that asks "which file am I?" must get the real file, not `linker64`.** The shim
+  answers `readlink("/proc/self/exe")` **and `realpath("/proc/self/exe")`**, both as the fully
+  resolved path (the kernel never returns a symlink). The .NET host (marksman, `dotnet`) uses
+  `realpath` and otherwise stops with "cannot execute dotnet when renamed to linker64". It then
+  finds `host/fxr` and the runtime next to that file, so `lib/dotnet/dotnet` must be the one it
+  sees. Host test: `scripts/test-exec-shim.sh` (builds the shim with gcc and checks both calls).
+- **Commands from a runtime installed while a terminal is open.** Wrapper scripts can't be exec'd,
+  so `init.sh` turns each one into a shell function when the shell starts; a runtime installed
+  later therefore wasn't known ("python3: inaccessible or not found") until a new terminal was
+  opened. Now `WrapperManager` bumps `usr/.wrappers_stamp` and the prompt (`PS1` containing the
+  mksh-only `${ list;}` current-shell substitution) redefines the functions when it changes. The
+  prompt already on screen was drawn before the install, so the *first* command typed there can
+  still fail once; pressing Enter fixes it. If the shell lacks `${ ;}` support nothing changes
+  (only new terminals see new commands).
+- **Don't run old language-server installers next to the new runtime ones.** After installing
+  Python from Runtimes, the leftover `installPylspIfNeeded` launched `python3` directly and
+  failed with "PYLSP Installation Failed … exit 126". The runtime's own Pyright is used instead.
 - **Changing startup work can unmask old bugs.** Before deleting "redundant" setup, check what
   it was quietly fixing.
 - **Termux binaries hardcode `/data/data/com.termux/files/usr`.** Remapped by the shim via

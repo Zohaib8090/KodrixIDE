@@ -613,9 +613,12 @@ static ssize_t fake_self_exe(const char *path, char *out, size_t size) {
     if (path == NULL || strcmp(path, "/proc/self/exe") != 0) return -2;
     const char *exe = getenv("KODRIX_EXE");
     if (exe == NULL || exe[0] == '\0') return -2;
-    size_t n = strlen(exe);
+    // The kernel reports the fully resolved file, never a symlink; do the same.
+    char canon[PATH_MAX];
+    const char *src = (real_realpath != NULL && real_realpath(exe, canon) != NULL) ? canon : exe;
+    size_t n = strlen(src);
     if (n > size) n = size;
-    memcpy(out, exe, n);
+    memcpy(out, src, n);
     return (ssize_t)n;
 }
 
@@ -662,6 +665,26 @@ DIR *opendir(const char *path) {
 
 char *realpath(const char *path, char *resolved) {
     ENSURE();
+    // Some programs (the .NET host, "cannot execute dotnet when renamed to linker64")
+    // ask for their own location with realpath("/proc/self/exe") instead of readlink.
+    if (path != NULL && strcmp(path, "/proc/self/exe") == 0) {
+        const char *exe = getenv("KODRIX_EXE");
+        if (exe != NULL && exe[0] != '\0') {
+            char canon[PATH_MAX];
+            const char *src = real_realpath(exe, canon) ? canon : exe;
+            size_t n = strlen(src);
+            if (n >= PATH_MAX) {
+                errno = ENAMETOOLONG;
+                return NULL;
+            }
+            if (resolved == NULL) {
+                resolved = malloc(n + 1);
+                if (resolved == NULL) return NULL;
+            }
+            memcpy(resolved, src, n + 1);
+            return resolved;
+        }
+    }
     char buf[PATH_MAX];
     return real_realpath(redirect(path, buf, sizeof(buf)), resolved);
 }

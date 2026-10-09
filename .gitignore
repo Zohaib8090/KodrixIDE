@@ -52,6 +52,7 @@ log.txt
 !CURRENT_TASK.md
 scripts/*.sh
 !scripts/apk-report.sh
+!scripts/test-exec-shim.sh
 !scripts/
 !app/src/main/jniLibs/
 temp-build/  

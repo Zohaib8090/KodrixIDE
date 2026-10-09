@@ -266,6 +266,14 @@ Confirmed by owner on device: terminal `node`/`npm`/`git` work and the language 
 install (2026-09-26, `main` builds). From an older build: Rust installed from Runtimes;
 `rustup`/`rust` "not found" (expected, now explained); `ls` Permission denied (fixed since).
 
+**2026-10-09, from the owner's phone:** Markdown support (marksman, .NET) failed with "cannot
+execute dotnet when renamed to linker64" → shim now answers `realpath("/proc/self/exe")` too,
+plus `DOTNET_SYSTEM_GLOBALIZATION_INVARIANT=1` / `DOTNET_EnableWriteXorExecute=0` for marksman
+(**unverified on device; reinstall Markdown support to pick up the env**). Python installed but
+`python3` was "not found" in the already-open terminal → prompt now refreshes commands. "PYLSP
+installation failed (exit 126)" came from a legacy installer that is now skipped for runtime
+Python. All three fixes await the owner's retest.
+
 **Not yet verified on a device** (all compile in CI):
 1. Downloaded Node: switch to Latest → `node -v` shows it (depends on linker64 launch + the
    wrapper-overwrite fix).

@@ -169,11 +169,12 @@ AutoAgent/AgentPanel system; shell-injection fix; CI APK workflow; Native Exec B
 installed or tested it on the phone**, so everything in the list below is still open. That
 test pass is the next step.
 
-Repo hygiene flagged (not acted on, owner to decide): `kodrix.jks` (a signing keystore) and
-two `google-services.json` files are committed to the public repo. If `kodrix.jks` signs
-release APKs, rotate it and purge it from history. `scratch/` (>1,000 extracted Termux files)
-is committed despite being in `.gitignore`. `TerminalViewModel.kt` is ~3.9k lines doing
-almost everything, and there are no tests.
+Repo hygiene (2026-10-20): `kodrix.jks`, `scratch/` and `_tmp_node/` are no longer tracked
+(files stay on disk, now gitignored along with `*.jks`/`*.keystore`). **Still open:** they remain
+in git history, so if `kodrix.jks` ever signed a release APK, rotate that key (history purge
+needs a force-push, owner's call). `androidApp/google-services.json` stays (the Gradle plugin
+needs it; Firebase client keys are not secrets, but restrict the key in the Firebase console).
+`TerminalViewModel.kt` is ~4k lines doing almost everything, and there are no tests.
 
 Confirmed by owner on device (older build): Rust installed from Runtimes; `rustup`/`rust`
 "not found" (expected — now explained); `ls` Permission denied (fixed since).

@@ -93,3 +93,9 @@ screen.png
 
 # Kotlin/Gradle build caches
 .kotlin/
+
+# Never commit these
+_tmp_node/
+kodrix.jks
+*.jks
+*.keystore

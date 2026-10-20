@@ -63,7 +63,7 @@ Approach, in order of preference:
    **Redirect target:** with per-pack envs (§5.1) there is no single Kodrix prefix. The redirect must map to the env of the binary that is running. Record it at exec-rewrite time (an env var set by ExecProxy alongside the `/proc/self/exe` fix, §2.F), not a global constant.
 2. **Environment** to avoid patching: `LD_LIBRARY_PATH` (searched before RUNPATH), `PYTHONHOME`, `SSL_CERT_FILE`, `TMPDIR`, `HOME`, `PATH`.
 3. **Install-time text rewrite** only for shebangs and small text config files (safe, length doesn't matter in text).
-4. Do **not** rely on `patch_elf.js`. Its `$ORIGIN/./././…` padding is wrong for executables in `usr/bin/` (needs `$ORIGIN/../lib`). Keep it only as a fallback experiment.
+4. Do **not** rely on `tools/patch_elf.js`. Its `$ORIGIN/./././…` padding is wrong for executables in `usr/bin/` (needs `$ORIGIN/../lib`). Keep it only as a fallback experiment.
 
 ### C. Pinned Termux URLs break — **already broken [verified]**
 

@@ -83,7 +83,7 @@ object BuiltinCatalog {
         "binaries": ["lua=lua5.4", "luac=luac5.4", "lua5.4", "luac5.4"],
         "lsp": { "command": ["%install%/share/lua-language-server/bin/lua-language-server", "--logpath=%install%/tmp/lua-ls/log", "--metapath=%install%/tmp/lua-ls/meta"] },
         "verify": { "command": ["%install%/bin/lua5.4", "-v"] },
-        "versions": [ { "packages": ["lua54", "lua-language-server"], "versionPackage": "lua54" } ]
+        "versions": [ { "packages": ["lua54", "readline", "lua-language-server"], "versionPackage": "lua54" } ]
       },
       "php": {
         "displayName": "PHP", "category": "Runtime", "icon": "php.png",

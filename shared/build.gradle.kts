@@ -51,6 +51,14 @@ kotlin {
                 implementation("com.google.firebase:firebase-analytics")
             }
         }
+        val androidUnitTest by getting {
+            dependencies {
+                implementation(kotlin("test"))
+                implementation("junit:junit:4.13.2")
+                // android.jar's org.json is a stub that throws in JVM unit tests
+                implementation("org.json:json:20231013")
+            }
+        }
         val desktopMain by getting {
             dependencies {
                 implementation(compose.desktop.currentOs)

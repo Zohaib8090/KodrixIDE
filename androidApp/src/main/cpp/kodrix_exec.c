@@ -178,6 +178,13 @@ static const char *replace_prefix(const char *path, size_t plen, const char *rep
 // /data/data/com.termux/files[/...] to $KODRIX_ROOT[/...]. Returns path unchanged when
 // it isn't a Termux path or the result wouldn't fit.
 static const char *redirect(const char *path, char *buf, size_t cap) {
+    // Programs started through linker64 would otherwise see /proc/self/exe == linker64.
+    // Some (e.g. the .NET host) open() it and read /proc/self/fd/N instead of calling
+    // readlink(), so point the open at the real binary too.
+    if (path != NULL && strcmp(path, "/proc/self/exe") == 0) {
+        const char *exe = getenv("KODRIX_EXE");
+        if (exe != NULL && exe[0] != '\0') return exe;
+    }
     if (path == NULL || strncmp(path, TERMUX_ROOT, TERMUX_ROOT_LEN) != 0) return path;
     char next = path[TERMUX_ROOT_LEN];
     if (next != '\0' && next != '/') return path;
